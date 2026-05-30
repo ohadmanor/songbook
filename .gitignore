@@ -1,0 +1,40 @@
+# Android build files
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/assets/www/*
+!android/assets/www/.gitkeep
+
+# IDE settings
+.idea/
+.vscode/
+*.iml
+.gradle/
+local.properties
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# Large generated binaries (optional to ignore, but keeps repo clean)
+# app-debug.apk
+# songbook.apk
+
+# Temporary/Cache files
+artist_cache.json
+scripts/artist_cache.json
+manual_edits.json
+scripts/manual_edits.json
+*.log
