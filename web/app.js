@@ -18,12 +18,19 @@ let state = {
   activeTooltipChord: null,
   instrument: 'guitar',
   hoveredChordElement: null,
-  
+
   // Setlist feature state
   setlists: [],
   activeTab: 'songs', // 'songs' | 'setlists'
   activeSetlistId: null,
-  activeSetlistSongIndex: null
+  activeSetlistSongIndex: null,
+
+  // Metronome state
+  metroBpm: 120,
+  metroBeats: 4,
+  metroMode: 'off', // 'off' | 'visual' | 'audio'
+  metroBeatCounter: 0,
+  metroIntervalId: null
 };
 
 // Safe localStorage wrapper for strict/incognito environments
@@ -82,7 +89,7 @@ const el = {
   songDisplayArea: document.getElementById('song-display-area'),
   chordTooltip: document.getElementById('chord-tooltip'),
   toastNotify: document.getElementById('toast-notify'),
-  
+
   // Setlist feature elements
   tabSongsBtn: document.getElementById('tab-songs-btn'),
   tabSetlistsBtn: document.getElementById('tab-setlists-btn'),
@@ -96,12 +103,21 @@ const el = {
   songsFooter: document.getElementById('songs-footer'),
   setlistsFooter: document.getElementById('setlists-footer'),
   newSetlistBtn: document.getElementById('new-setlist-btn'),
+  mainImportSetlistBtn: document.getElementById('main-import-setlist-btn'),
   setlistExportBtn: document.getElementById('setlist-export-btn'),
   setlistImportBtn: document.getElementById('setlist-import-btn'),
   setlistsImportFile: document.getElementById('setlists-import-file'),
   searchContainer: document.getElementById('search-container'),
   toolbarSetlistSelect: document.getElementById('toolbar-setlist-select'),
-  
+
+  // Metronome Elements
+  metroLed: document.getElementById('metro-led'),
+  metroToggleBtn: document.getElementById('metro-toggle-btn'),
+  metroBpmDecBtn: document.getElementById('metro-bpm-dec-btn'),
+  metroBpmVal: document.getElementById('metro-bpm-val'),
+  metroBpmIncBtn: document.getElementById('metro-bpm-inc-btn'),
+  metroBeatsSelect: document.getElementById('metro-beats-select'),
+
   // Modal Elements
   newSongBtn: document.getElementById('new-song-btn'),
   songModal: document.getElementById('song-modal'),
@@ -135,10 +151,10 @@ const SETLIST_STORE_NAME = 'setlists';
 function initDB() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    
+
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
-    
+
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -160,7 +176,7 @@ function dbGetAllSetlists(dbInstance) {
     const transaction = dbInstance.transaction(SETLIST_STORE_NAME, 'readonly');
     const store = transaction.objectStore(SETLIST_STORE_NAME);
     const request = store.getAll();
-    
+
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
   });
@@ -175,7 +191,7 @@ function dbPutSetlist(dbInstance, setlist) {
     const transaction = dbInstance.transaction(SETLIST_STORE_NAME, 'readwrite');
     const store = transaction.objectStore(SETLIST_STORE_NAME);
     const request = store.put(setlist);
-    
+
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
@@ -190,7 +206,7 @@ function dbDeleteSetlist(dbInstance, id) {
     const transaction = dbInstance.transaction(SETLIST_STORE_NAME, 'readwrite');
     const store = transaction.objectStore(SETLIST_STORE_NAME);
     const request = store.delete(id);
-    
+
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
@@ -201,7 +217,7 @@ function dbGetAllSongs(db) {
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.getAll();
-    
+
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
   });
@@ -211,9 +227,9 @@ function dbPutSongs(db, songsList) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
-    
+
     songsList.forEach(song => store.put(song));
-    
+
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
@@ -224,7 +240,7 @@ function dbPutSong(db, song) {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.put(song);
-    
+
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
@@ -235,7 +251,7 @@ function dbDeleteSong(db, id) {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.delete(id);
-    
+
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
@@ -262,7 +278,7 @@ function escapeHTML(str) {
 // Clean chord names ending with 0, o, or O to display as 'dim'
 function cleanChordNameForDisplay(chordStr) {
   if (!chordStr) return '';
-  
+
   const cleanSingle = (str) => {
     const trimmed = str.trim();
     if (trimmed.endsWith('0') || trimmed.endsWith('o') || trimmed.endsWith('O')) {
@@ -270,7 +286,7 @@ function cleanChordNameForDisplay(chordStr) {
     }
     return trimmed;
   };
-  
+
   return chordStr.split('/').map(part => {
     const cleanPart = part.trim();
     if (cleanPart.includes('-')) {
@@ -297,28 +313,28 @@ async function init() {
 
   try {
     db = await initDB();
-    
+
     // Check if we have default songs from index.html (songs-data.js)
     let songsJsonText = JSON.stringify(defaultSongs);
     localSongs = await dbGetAllSongs(db);
-    
+
     // Load setlists
     state.setlists = await dbGetAllSetlists(db);
     renderToolbarSetlistSelect();
-    
+
     // Auto-sync logic
     if (defaultSongs.length > 0) {
       const newVersion = window.defaultSongsVersion || 'unknown';
       const oldVersion = localStorage.getItem('songs_db_version');
-      
+
       if (newVersion !== oldVersion || localSongs.length === 0) {
         console.log("Syncing songbook database with songs-data.js version:", newVersion);
-        
+
         // 1. Identify user-edited standard songs in the local DB
         const localEditedMap = new Map(
           localSongs.filter(s => s.modifiedByUser).map(s => [s.id, s])
         );
-        
+
         // 2. Build list of default songs to sync (excluding ones user has edited)
         const songsToPut = [];
         for (const defaultSong of defaultSongs) {
@@ -327,11 +343,11 @@ async function init() {
           }
           songsToPut.push(defaultSong);
         }
-        
+
         if (songsToPut.length > 0) {
           await dbPutSongs(db, songsToPut);
         }
-        
+
         // 3. Remove standard songs no longer in songs-data.js (and not edited by user)
         const fetchedMap = new Map(defaultSongs.map(s => [s.id, s]));
         for (const localSong of localSongs) {
@@ -339,7 +355,7 @@ async function init() {
             await dbDeleteSong(db, localSong.id);
           }
         }
-        
+
         // Reload final songs list
         localSongs = await dbGetAllSongs(db);
         localStorage.setItem('songs_db_version', newVersion);
@@ -353,13 +369,13 @@ async function init() {
     localSongs = defaultSongs;
     state.setlists = [];
   }
-  
+
   state.songs = localSongs;
   state.filteredSongs = [...localSongs];
-  
+
   // Sort songs alphabetically by Title
   sortSongs();
-  
+
   // Setup initial routing/view
   if (state.songs.length > 0) {
     // Restore last viewed song or first song
@@ -367,13 +383,13 @@ async function init() {
     const songExists = state.songs.some(s => s.id === lastViewedId);
     state.currentSongId = songExists ? lastViewedId : state.songs[0].id;
   }
-  
+
   // Load Settings
   loadSettings();
-  
+
   // Event bindings
   bindEvents(db);
-  
+
   // Initial Render
   renderSidebar();
   renderSongList();
@@ -391,17 +407,17 @@ function loadSettings() {
   state.theme = savedTheme;
   el.themeSelect.value = savedTheme;
   document.documentElement.setAttribute('data-theme', savedTheme);
-  
+
   // Font Size
   const savedFontSize = parseFloat(localStorage.getItem('fontSize')) || 1.0;
   state.fontSize = savedFontSize;
   updateFontSizeUI();
-  
+
   // Flat/Sharp preference
   const savedPreferFlats = localStorage.getItem('preferFlats') === 'true';
   state.preferFlats = savedPreferFlats;
   el.enharmonicToggleBtn.textContent = savedPreferFlats ? 'b' : '#';
-  
+
   // Instrument selection
   const savedInstrument = localStorage.getItem('instrument') || 'guitar';
   state.instrument = savedInstrument;
@@ -414,14 +430,14 @@ function bindEvents(db) {
   // Synchronized Search Handler
   const performSearch = (query, sourceInput) => {
     const cleanQuery = query.toLowerCase().trim();
-    
+
     // Sync query values across both inputs
     if (sourceInput === el.searchInput && el.toolbarSearchInput) {
       el.toolbarSearchInput.value = query;
     } else if (sourceInput === el.toolbarSearchInput && el.searchInput) {
       el.searchInput.value = query;
     }
-    
+
     if (cleanQuery.length < 3) {
       state.filteredSongs = [...state.songs];
       if (el.toolbarSearchDropdown) {
@@ -429,12 +445,12 @@ function bindEvents(db) {
         el.toolbarSearchDropdown.style.display = 'none';
       }
     } else {
-      state.filteredSongs = state.songs.filter(song => 
-        song.title.toLowerCase().includes(cleanQuery) || 
-        song.artist.toLowerCase().includes(cleanQuery) || 
+      state.filteredSongs = state.songs.filter(song =>
+        song.title.toLowerCase().includes(cleanQuery) ||
+        song.artist.toLowerCase().includes(cleanQuery) ||
         song.key.toLowerCase().includes(cleanQuery)
       );
-      
+
       // Update floating dropdown for toolbar search
       if (el.toolbarSearchDropdown) {
         el.toolbarSearchDropdown.innerHTML = '';
@@ -444,29 +460,29 @@ function bindEvents(db) {
           state.filteredSongs.forEach(song => {
             const dropdownItem = document.createElement('div');
             dropdownItem.className = 'search-dropdown-item';
-            
+
             // Clean display values
             const cleanTitle = escapeHTML(song.title);
             const cleanArtist = escapeHTML(song.artist);
-            
+
             dropdownItem.innerHTML = `
               <div class="title">${cleanTitle}</div>
               <div class="artist">${cleanArtist}</div>
             `;
-            
+
             dropdownItem.addEventListener('click', () => {
               // Open selected song
               state.currentSongId = song.id;
               localStorage.setItem('lastViewedSongId', song.id);
-              
+
               // Reset transposition and scroll state
               state.transposeOffset = 0;
               el.transposeVal.textContent = '0';
               if (state.isScrolling) toggleAutoScroll();
-              
+
               renderSongList();
               renderActiveSong();
-              
+
               // Reset search queries and hide dropdown
               el.toolbarSearchInput.value = '';
               if (el.searchInput) el.searchInput.value = '';
@@ -500,14 +516,14 @@ function bindEvents(db) {
       }
     });
   }
-  
+
   // Close toolbar search dropdown when clicking outside
   document.addEventListener('click', (e) => {
     if (el.toolbarSearchDropdown && !e.target.closest('.search-wrapper')) {
       el.toolbarSearchDropdown.style.display = 'none';
     }
   });
-  
+
   // Theme selection
   el.themeSelect.addEventListener('change', (e) => {
     const theme = e.target.value;
@@ -515,19 +531,19 @@ function bindEvents(db) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   });
-  
+
   // Instrument selection
   if (el.instrumentSelect) {
     el.instrumentSelect.addEventListener('change', (e) => {
       const instrument = e.target.value;
       state.instrument = instrument;
       localStorage.setItem('instrument', instrument);
-      
+
       // If there is an active tooltip, update its content immediately
       if (state.activeTooltipChord) {
         const svgHtml = window.ChordDB.renderChordDiagram(state.activeTooltipChord, state.instrument);
         el.chordTooltip.innerHTML = svgHtml;
-        
+
         // Reposition tooltip since dimensions change between guitar (130px) and piano (230px)
         const targetEl = state.pinnedChordElement || state.hoveredChordElement;
         if (targetEl) {
@@ -536,7 +552,7 @@ function bindEvents(db) {
       }
     });
   }
-  
+
   // Font Controls
   el.fontDecBtn.addEventListener('click', () => {
     if (state.fontSize > 0.7) {
@@ -550,7 +566,7 @@ function bindEvents(db) {
       updateFontSizeUI();
     }
   });
-  
+
   // Transpose Controls
   el.transposeDecBtn.addEventListener('click', () => {
     if (state.transposeOffset > -11) {
@@ -570,31 +586,31 @@ function bindEvents(db) {
     localStorage.setItem('preferFlats', state.preferFlats);
     renderActiveSong();
   });
-  
+
   // Auto Scroll Slider
   el.scrollSpeedSlider.addEventListener('input', (e) => {
     state.scrollSpeed = parseInt(e.target.value);
   });
-  
+
   // Auto Scroll Toggle
   el.scrollToggleBtn.addEventListener('click', () => {
     toggleAutoScroll();
   });
-  
+
   // Wake Lock Button
   el.wakeLockBtn.addEventListener('click', () => {
     toggleWakeLock();
   });
-  
+
   // Mobile Nav Buttons
   el.showSidebarBtn.addEventListener('click', () => el.sidebar.classList.add('active'));
   el.hideSidebarBtn.addEventListener('click', () => el.sidebar.classList.remove('active'));
-  
+
   // Modals opening/closing
   el.newSongBtn.addEventListener('click', () => openSongModal());
   el.closeModalBtn.addEventListener('click', () => closeSongModal());
   el.cancelModalBtn.addEventListener('click', () => closeSongModal());
-  
+
   // Save Song Button
   el.saveSongBtn.addEventListener('click', async () => {
     const title = el.formTitle.value.trim();
@@ -602,16 +618,16 @@ function bindEvents(db) {
     const key = el.formKey.value.trim();
     const isRTL = el.formRtl.checked;
     const rawText = el.formText.value.trim();
-    
+
     if (!title || !rawText) {
       showToast("Title and lyrics content are required.");
       return;
     }
-    
+
     const id = el.editSongId.value || 'custom_' + Date.now();
     const originalSong = state.songs.find(s => s.id === id);
     const filename = originalSong ? originalSong.filename : null;
-    
+
     const song = { id, title, artist, key, isRTL, rawText };
     if (filename) {
       song.filename = filename;
@@ -619,7 +635,7 @@ function bindEvents(db) {
     if (id.startsWith('song_')) {
       song.modifiedByUser = true;
     }
-    
+
     // Attempt to sync edits back to host disk using local server API
     try {
       const response = await fetch('/api/save-song', {
@@ -635,14 +651,14 @@ function bindEvents(db) {
     } catch (err) {
       console.log("Local sync server unavailable. Saving locally inside browser only.");
     }
-    
+
     try {
       if (db) {
         await dbPutSong(db, song);
       } else {
         console.warn("Offline database: saving changes in memory only.");
       }
-      
+
       // Update local state
       const existingIdx = state.songs.findIndex(s => s.id === id);
       if (existingIdx >= 0) {
@@ -652,13 +668,13 @@ function bindEvents(db) {
         state.songs.push(song);
         showToast("Song added successfully.");
       }
-      
+
       // Sync UI
       state.filteredSongs = [...state.songs];
       sortSongs();
       state.currentSongId = id;
       localStorage.setItem('lastViewedSongId', id);
-      
+
       closeSongModal();
       renderSongList();
       renderActiveSong();
@@ -672,7 +688,7 @@ function bindEvents(db) {
   el.deleteSongBtn.addEventListener('click', async () => {
     const id = el.editSongId.value;
     if (!id) return;
-    
+
     if (confirm("Are you sure you want to delete this song permanently?")) {
       try {
         if (db) {
@@ -681,19 +697,19 @@ function bindEvents(db) {
           console.warn("Offline database: deleting from memory only.");
         }
         showToast("Song deleted.");
-        
+
         state.songs = state.songs.filter(s => s.id !== id);
         state.filteredSongs = [...state.songs];
-        
+
         closeSongModal();
-        
+
         if (state.songs.length > 0) {
           state.currentSongId = state.songs[0].id;
           localStorage.setItem('lastViewedSongId', state.currentSongId);
         } else {
           state.currentSongId = null;
         }
-        
+
         renderSongList();
         renderActiveSong();
       } catch (e) {
@@ -707,7 +723,7 @@ function bindEvents(db) {
   el.exportDbBtn.addEventListener('click', () => {
     const jsonContent = JSON.stringify(state.songs, null, 2);
     const filename = "songbook_backup.json";
-    
+
     if (typeof AndroidApp !== 'undefined' && AndroidApp.shareTextFile) {
       AndroidApp.shareTextFile(filename, jsonContent);
       showToast("Export triggered via system share sheet.");
@@ -726,17 +742,17 @@ function bindEvents(db) {
   // Chord Hover / Tap Tooltip events
   document.addEventListener('mouseover', handleChordTooltipOpen);
   document.addEventListener('mouseout', handleChordTooltipClose);
-  
+
   // Touch event for mobile chord interaction (toggle display on tap)
   document.addEventListener('click', handleChordTooltipTap);
-  
+
   // Toggle image zoom expansion
   document.addEventListener('click', (e) => {
     if (e.target.classList.contains('song-image')) {
       e.target.classList.toggle('expanded');
     }
   });
-  
+
   // Handle viewport resize (to close mobile nav)
   window.addEventListener('resize', () => {
     if (window.innerWidth > 768) {
@@ -749,17 +765,17 @@ function bindEvents(db) {
     el.formImportFile.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      
+
       el.importStatus.textContent = "Processing...";
-      
+
       try {
         const result = await parseDocxFile(file);
-        
+
         // Auto-populate fields
         el.formTitle.value = result.title;
         el.formText.value = result.text;
         el.formRtl.checked = result.isRTL;
-        
+
         el.importStatus.textContent = "Imported successfully!";
         showToast("Word document converted.");
       } catch (err) {
@@ -809,7 +825,7 @@ function bindEvents(db) {
       renderActiveSong();
     });
   }
-  
+
   if (el.tabSetlistsBtn) {
     el.tabSetlistsBtn.addEventListener('click', () => {
       state.activeTab = 'setlists';
@@ -817,18 +833,18 @@ function bindEvents(db) {
       renderActiveSong();
     });
   }
-  
+
   if (el.newSetlistBtn) {
     el.newSetlistBtn.addEventListener('click', async () => {
       const name = prompt("Enter setlist name:");
       if (!name || !name.trim()) return;
-      
+
       const newSetlist = {
         id: 'setlist_' + Date.now(),
         name: name.trim(),
         songs: []
       };
-      
+
       try {
         if (db) {
           await dbPutSetlist(db, newSetlist);
@@ -837,7 +853,7 @@ function bindEvents(db) {
         state.activeSetlistId = newSetlist.id;
         state.activeSetlistSongIndex = null;
         state.activeTab = 'setlists';
-        
+
         showToast("Setlist created.");
         renderToolbarSetlistSelect();
         renderSidebar();
@@ -847,7 +863,7 @@ function bindEvents(db) {
       }
     });
   }
-  
+
   if (el.setlistBackBtn) {
     el.setlistBackBtn.addEventListener('click', () => {
       state.activeSetlistId = null;
@@ -856,12 +872,12 @@ function bindEvents(db) {
       renderActiveSong();
     });
   }
-  
+
   if (el.setlistNameInput) {
     el.setlistNameInput.addEventListener('change', async (e) => {
       const newName = e.target.value.trim();
       if (!newName) return;
-      
+
       const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
       if (setlist) {
         setlist.name = newName;
@@ -877,12 +893,12 @@ function bindEvents(db) {
       }
     });
   }
-  
+
   if (el.setlistDeleteBtn) {
     el.setlistDeleteBtn.addEventListener('click', async () => {
       const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
       if (!setlist) return;
-      
+
       if (confirm(`Are you sure you want to delete the setlist "${setlist.name}" permanently?`)) {
         try {
           if (db) {
@@ -891,7 +907,7 @@ function bindEvents(db) {
           state.setlists = state.setlists.filter(s => s.id !== setlist.id);
           state.activeSetlistId = null;
           state.activeSetlistSongIndex = null;
-          
+
           showToast("Setlist deleted.");
           renderToolbarSetlistSelect();
           renderSidebar();
@@ -903,18 +919,18 @@ function bindEvents(db) {
       }
     });
   }
-  
+
   if (el.setlistAddSongSelect) {
     el.setlistAddSongSelect.addEventListener('change', async (e) => {
       const songId = e.target.value;
       if (!songId) return;
-      
+
       const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
       if (!setlist) return;
-      
+
       // Add song with default transpose offset of 0
       setlist.songs.push({ songId, transposeOffset: 0 });
-      
+
       try {
         if (db) {
           await dbPutSetlist(db, setlist);
@@ -933,37 +949,65 @@ function bindEvents(db) {
   if (el.setlistExportBtn) {
     el.setlistExportBtn.addEventListener('click', () => {
       const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
-      if (!setlist) {
-        showToast("No active setlist to export.");
-        return;
-      }
-      
-      const jsonContent = JSON.stringify(setlist, null, 2);
-      const safeName = setlist.name.replace(/[^a-zA-Z0-9\u0590-\u05FF]/g, '_').toLowerCase();
-      const filename = `setlist_${safeName}.json`;
-      
-      if (typeof AndroidApp !== 'undefined' && AndroidApp.shareTextFile) {
-        AndroidApp.shareTextFile(filename, jsonContent);
-        showToast("Export triggered via system share sheet.");
-      } else {
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonContent);
-        const downloadAnchor = document.createElement('a');
-        downloadAnchor.setAttribute("href", dataStr);
-        downloadAnchor.setAttribute("download", filename);
-        document.body.appendChild(downloadAnchor);
-        downloadAnchor.click();
-        downloadAnchor.remove();
-        showToast(`Setlist "${setlist.name}" exported.`);
-      }
+      exportSetlistToFile(setlist);
     });
   }
 
-  // Setlist Import Trigger (inside active setlist editor)
+  // Setlist Import Trigger (inside active setlist editor or main list)
+  if (el.mainImportSetlistBtn) {
+    el.mainImportSetlistBtn.addEventListener('click', () => {
+      el.setlistsImportFile.click();
+    });
+  }
+
   if (el.setlistImportBtn && el.setlistsImportFile) {
     el.setlistImportBtn.addEventListener('click', () => {
       el.setlistsImportFile.click();
     });
+  }
 
+  // Metronome Event Listeners
+  if (el.metroToggleBtn) {
+    el.metroToggleBtn.addEventListener('click', () => {
+      if (state.metroMode === 'off') {
+        state.metroMode = 'visual';
+        el.metroToggleBtn.textContent = '👁️';
+        el.metroToggleBtn.title = "Metronome: Visual Only (Click to switch to Audible)";
+      } else if (state.metroMode === 'visual') {
+        state.metroMode = 'audio';
+        el.metroToggleBtn.textContent = '🔊';
+        el.metroToggleBtn.title = "Metronome: Audio + Visual (Click to turn Off)";
+      } else {
+        state.metroMode = 'off';
+        el.metroToggleBtn.textContent = '🔇';
+        el.metroToggleBtn.title = "Metronome: Off (Click to turn On)";
+      }
+      updateMetronomeTimer();
+    });
+  }
+
+  if (el.metroBpmDecBtn) {
+    el.metroBpmDecBtn.addEventListener('click', () => {
+      changeBpm(-1);
+    });
+  }
+
+  if (el.metroBpmIncBtn) {
+    el.metroBpmIncBtn.addEventListener('click', () => {
+      changeBpm(1);
+    });
+  }
+
+  if (el.metroBeatsSelect) {
+    el.metroBeatsSelect.addEventListener('change', (e) => {
+      state.metroBeats = parseInt(e.target.value) || 4;
+      if (state.metroIntervalId) {
+        updateMetronomeTimer();
+      }
+    });
+  }
+
+  if (el.setlistsImportFile) {
     el.setlistsImportFile.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -972,7 +1016,7 @@ function bindEvents(db) {
       reader.onload = async (evt) => {
         try {
           const imported = JSON.parse(evt.target.result);
-          
+
           // Verify that it represents a single setlist structure (name and songs array)
           let setlistItem = null;
           if (Array.isArray(imported)) {
@@ -992,7 +1036,7 @@ function bindEvents(db) {
           // We are inside the active setlist editor, so we have state.activeSetlistId
           const activeSetlist = state.setlists.find(s => s.id === state.activeSetlistId);
           const activeName = activeSetlist ? activeSetlist.name : 'current setlist';
-          
+
           if (confirm(`Do you want to overwrite the current setlist "${activeName}" with the imported songs? (Cancel to import as a new setlist)`)) {
             // Overwrite current setlist
             if (activeSetlist) {
@@ -1013,14 +1057,14 @@ function bindEvents(db) {
             // Import as a new setlist
             const newSetlist = JSON.parse(JSON.stringify(setlistItem));
             newSetlist.id = 'setlist_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-            
+
             // Check for name collision
             let baseName = newSetlist.name;
             let nameCollision = state.setlists.some(s => s.name === baseName);
             if (nameCollision) {
               newSetlist.name = baseName + ' (Copy)';
             }
-            
+
             state.setlists.push(newSetlist);
             if (db) {
               await dbPutSetlist(db, newSetlist);
@@ -1049,12 +1093,12 @@ function bindEvents(db) {
  */
 async function parseDocxFile(file) {
   const zip = await JSZip.loadAsync(file);
-  
+
   // 1. Read document.xml
   const docXmlText = await zip.file("word/document.xml").async("text");
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(docXmlText, "text/xml");
-  
+
   // 2. Read relationships file document.xml.rels if it exists
   const relsMap = {};
   try {
@@ -1074,11 +1118,11 @@ async function parseDocxFile(file) {
   } catch (e) {
     console.warn("Failed to parse relationships files:", e);
   }
-  
+
   // Helper: extract text and images from a paragraph node w:p
   const extractParagraphContent = async (pNode) => {
     let text = "";
-    
+
     // Extract runs (r)
     const runs = pNode.getElementsByTagNameNS("*", "r");
     for (let i = 0; i < runs.length; i++) {
@@ -1088,22 +1132,22 @@ async function parseDocxFile(file) {
         text += texts[j].textContent || "";
       }
     }
-    
+
     // Check for drawing/images (drawing)
     const drawings = pNode.getElementsByTagNameNS("*", "drawing");
     const imagePlaceholders = [];
-    
+
     for (let i = 0; i < drawings.length; i++) {
       const drawing = drawings[i];
       const blips = drawing.getElementsByTagNameNS("*", "blip");
-      
+
       for (let j = 0; j < blips.length; j++) {
         const blip = blips[j];
         // Relies on r:embed attribute
-        let embedId = blip.getAttribute("r:embed") || 
-                      blip.getAttribute("embed") || 
-                      blip.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "embed");
-        
+        let embedId = blip.getAttribute("r:embed") ||
+          blip.getAttribute("embed") ||
+          blip.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "embed");
+
         if (!embedId) {
           // Scan attributes ending with embed
           for (let a = 0; a < blip.attributes.length; a++) {
@@ -1114,11 +1158,11 @@ async function parseDocxFile(file) {
             }
           }
         }
-        
+
         if (embedId && relsMap[embedId]) {
           const mediaPath = relsMap[embedId];
           const zipMediaPath = `word/${mediaPath}`;
-          
+
           const mediaFile = zip.file(zipMediaPath);
           if (mediaFile) {
             // Read as base64 data URL
@@ -1132,14 +1176,14 @@ async function parseDocxFile(file) {
             } else if (mediaPath.toLowerCase().endsWith(".svg")) {
               mimeType = "image/svg+xml";
             }
-            
+
             const dataUrl = `data:${mimeType};base64,${base64Bytes}`;
             imagePlaceholders.push(`[IMAGE: ${dataUrl}]`);
           }
         }
       }
     }
-    
+
     if (imagePlaceholders.length > 0) {
       if (text.trim()) {
         return text + "\n" + imagePlaceholders.join("\n");
@@ -1149,29 +1193,29 @@ async function parseDocxFile(file) {
     }
     return text;
   };
-  
+
   // Find w:body element
   const bodyNode = xmlDoc.getElementsByTagNameNS("*", "body")[0];
   if (!bodyNode) return { title: "", text: "", isRTL: false };
-  
+
   const paragraphs = [];
-  
+
   // Walk through the immediate children of w:body to preserve table column flow
   const bodyChildren = bodyNode.childNodes;
   for (let i = 0; i < bodyChildren.length; i++) {
     const child = bodyChildren[i];
     const nodeNameClean = child.nodeName.split(":").pop();
-    
+
     // Normal paragraph (w:p)
     if (nodeNameClean === "p") {
       const text = await extractParagraphContent(child);
       paragraphs.push(text);
-    } 
+    }
     // Table element (w:tbl)
     else if (nodeNameClean === "tbl") {
       const col1 = [];
       const col2 = [];
-      
+
       const rows = child.getElementsByTagNameNS("*", "tr");
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r];
@@ -1189,26 +1233,174 @@ async function parseDocxFile(file) {
           }
         }
       }
-      
+
       paragraphs.push(...col1);
       paragraphs.push(...col2);
     }
   }
-  
+
   // Format the output document text
   const cleanLyrics = paragraphs.join("\n");
-  
+
   // Title extraction (Clean filename)
   const filename = file.name;
   let title = filename.replace(/\.docx$/i, "");
   title = title.replace(/^\d+[\s\-_]*/, ""); // strip numbers like "01 - "
   title = title.replace(/[_\-]/g, " "); // replace dashes with spaces
   title = title.replace(/\s+/g, " ").trim(); // normalize spacing
-  
+
   // Detect Hebrew (RTL)
   const hasHebrew = /[\u0590-\u05FF]/.test(cleanLyrics) || /[\u0590-\u05FF]/.test(title);
-  
+
   return { title, text: cleanLyrics, isRTL: hasHebrew };
+}
+
+// ==========================================
+// METRONOME FEATURE HELPER & LOGIC FUNCTIONS
+// ==========================================
+
+let metroAudioCtx = null;
+function playTick(isDownbeat = false) {
+  if (!metroAudioCtx) {
+    metroAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (metroAudioCtx.state === 'suspended') {
+    metroAudioCtx.resume();
+  }
+
+  const time = metroAudioCtx.currentTime;
+
+  if (isDownbeat) {
+    // Foot Drum (Kick Drum) on the downbeat/new bar
+    const osc = metroAudioCtx.createOscillator();
+    const gain = metroAudioCtx.createGain();
+
+    osc.connect(gain);
+    gain.connect(metroAudioCtx.destination);
+
+    osc.type = 'triangle';
+    // Rapid frequency sweep from 150Hz down to 30Hz for the kick sound
+    osc.frequency.setValueAtTime(150, time);
+    osc.frequency.exponentialRampToValueAtTime(30, time + 0.15);
+
+    // Quick volume decay over 180ms
+    gain.gain.setValueAtTime(1.0, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.18);
+
+    osc.start(time);
+    osc.stop(time + 0.18);
+  } else {
+    // Closed Hi-Hat on other beats
+    const bufferSize = metroAudioCtx.sampleRate * 0.05; // 50ms buffer
+    const buffer = metroAudioCtx.createBuffer(1, bufferSize, metroAudioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    // Generate white noise
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = metroAudioCtx.createBufferSource();
+    noise.buffer = buffer;
+
+    // High-pass filter at 7kHz to mimic hi-hat metallic sizzle
+    const filter = metroAudioCtx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(7000, time);
+
+    const gain = metroAudioCtx.createGain();
+    // Rapid exponential decay over 40ms
+    gain.gain.setValueAtTime(0.2, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(metroAudioCtx.destination);
+
+    noise.start(time);
+    noise.stop(time + 0.04);
+  }
+}
+
+function updateMetronomeTimer() {
+  // Clear any existing timer
+  if (state.metroIntervalId) {
+    clearInterval(state.metroIntervalId);
+    state.metroIntervalId = null;
+  }
+
+  // Turn off LED flash
+  if (el.metroLed) {
+    el.metroLed.style.backgroundColor = 'var(--text-secondary)';
+    el.metroLed.style.boxShadow = 'none';
+  }
+
+  // We only tick if metronome mode is not 'off'
+  if (state.metroMode !== 'off') {
+    const intervalMs = (60 / state.metroBpm) * 1000;
+    state.metroBeatCounter = 0;
+
+    // Trigger first beat immediately
+    triggerMetroBeat();
+
+    state.metroIntervalId = setInterval(() => {
+      triggerMetroBeat();
+    }, intervalMs);
+  }
+}
+
+function triggerMetroBeat() {
+  const beats = parseInt(state.metroBeats) || 4;
+  const isDownbeat = (state.metroBeatCounter % beats) === 0;
+
+  // 1. Audio tick
+  if (state.metroMode === 'audio') {
+    try {
+      playTick(isDownbeat);
+    } catch (e) {
+      console.warn("AudioContext error:", e);
+    }
+  }
+
+  // 2. Visual flash
+  if (el.metroLed) {
+    const flashColor = isDownbeat ? '#22c55e' : '#eab308';
+    el.metroLed.style.backgroundColor = flashColor;
+    el.metroLed.style.boxShadow = `0 0 8px ${flashColor}`;
+
+    // Turn off after 100ms
+    setTimeout(() => {
+      if (state.metroIntervalId) {
+        el.metroLed.style.backgroundColor = 'var(--text-secondary)';
+        el.metroLed.style.boxShadow = 'none';
+      }
+    }, 100);
+  }
+
+  state.metroBeatCounter++;
+}
+
+function changeBpm(delta) {
+  const newBpm = Math.max(40, Math.min(250, state.metroBpm + delta));
+  if (newBpm !== state.metroBpm) {
+    state.metroBpm = newBpm;
+    if (el.metroBpmVal) {
+      el.metroBpmVal.textContent = newBpm;
+    }
+
+    // Save to current song
+    const song = state.songs.find(s => s.id === state.currentSongId);
+    if (song) {
+      song.bpm = newBpm;
+      if (db) {
+        dbPutSong(db, song).catch(e => console.error("Error saving song BPM:", e));
+      }
+    }
+
+    // Restart metronome timer with new BPM if it's currently running
+    if (state.metroIntervalId) {
+      updateMetronomeTimer();
+    }
+  }
 }
 
 // Font Size Helpers
@@ -1229,20 +1421,20 @@ function updateTransposeUI() {
 // Sidebar Render
 function renderSongList() {
   el.songList.innerHTML = '';
-  
+
   if (state.filteredSongs.length === 0) {
     el.songList.innerHTML = '<div style="padding: 1.5rem; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">No songs found.</div>';
     return;
   }
-  
+
   state.filteredSongs.forEach(song => {
     const item = document.createElement('div');
     item.className = `song-item ${song.id === state.currentSongId ? 'active' : ''}`;
-    
+
     // Create label tag for Language/RTL
     const langTag = song.isRTL ? '<span style="font-size: 0.7rem; background: var(--border-color); padding: 1px 4px; border-radius: 4px; color: var(--text-secondary);">עב</span>' : '';
     const keyLabel = song.key ? `<span style="font-family: 'Roboto Mono', monospace; font-weight: bold;">${song.key}</span>` : '';
-    
+
     item.innerHTML = `
       <span class="song-title">${escapeHTML(song.title)}</span>
       <div class="song-details">
@@ -1253,33 +1445,33 @@ function renderSongList() {
         </div>
       </div>
     `;
-    
+
     item.addEventListener('click', () => {
       state.currentSongId = song.id;
       localStorage.setItem('lastViewedSongId', song.id);
-      
+
       // Reset transpose on song change
       state.transposeOffset = 0;
       el.transposeVal.textContent = '0';
-      
+
       // Clear active setlist song context
       state.activeSetlistSongIndex = null;
-      
+
       // Stop scroll on song change
       if (state.isScrolling) {
         toggleAutoScroll();
       }
-      
+
       renderSongList();
       renderActiveSong();
-      
+
       // Hide mobile sidebar
       el.sidebar.classList.remove('active');
-      
+
       // Scroll song view back to top
       el.songViewport.scrollTop = 0;
     });
-    
+
     el.songList.appendChild(item);
   });
 }
@@ -1287,7 +1479,7 @@ function renderSongList() {
 // Active Song Renderer
 function renderActiveSong() {
   el.songDisplayArea.innerHTML = '';
-  
+
   if (!state.currentSongId) {
     el.songDisplayArea.innerHTML = `
       <div class="empty-state">
@@ -1297,23 +1489,38 @@ function renderActiveSong() {
     `;
     return;
   }
-  
+
   const song = state.songs.find(s => s.id === state.currentSongId);
   if (!song) return;
-  
+
+  // Load BPM for current song
+  if (song.bpm) {
+    state.metroBpm = song.bpm;
+  } else {
+    state.metroBpm = 120; // default
+  }
+  if (el.metroBpmVal) {
+    el.metroBpmVal.textContent = state.metroBpm;
+  }
+
+  // Restart metronome timer if running
+  if (state.metroIntervalId) {
+    updateMetronomeTimer();
+  }
+
   // Build Song Display Container
   const container = document.createElement('div');
   container.className = `song-container ${song.isRTL ? 'rtl' : ''}`;
-  
+
   // Floating Setlist Gig Navigation Bar
   const activeSetlist = state.setlists.find(s => s.id === state.activeSetlistId);
   if (activeSetlist && state.activeSetlistSongIndex !== null) {
     const navBar = document.createElement('div');
     navBar.className = 'setlist-gig-nav';
-    
+
     const prevDisabled = state.activeSetlistSongIndex === 0 ? 'disabled' : '';
     const nextDisabled = state.activeSetlistSongIndex === activeSetlist.songs.length - 1 ? 'disabled' : '';
-    
+
     navBar.innerHTML = `
       <button class="btn gig-nav-btn" id="gig-prev-btn" ${prevDisabled}>← Prev</button>
       <div class="gig-nav-info">
@@ -1322,22 +1529,22 @@ function renderActiveSong() {
       </div>
       <button class="btn gig-nav-btn" id="gig-next-btn" ${nextDisabled}>Next →</button>
     `;
-    
+
     container.appendChild(navBar);
-    
+
     navBar.querySelector('#gig-prev-btn').addEventListener('click', () => {
       if (state.activeSetlistSongIndex > 0) {
         navigateToSetlistSong(state.activeSetlistSongIndex - 1);
       }
     });
-    
+
     navBar.querySelector('#gig-next-btn').addEventListener('click', () => {
       if (state.activeSetlistSongIndex < activeSetlist.songs.length - 1) {
         navigateToSetlistSong(state.activeSetlistSongIndex + 1);
       }
     });
   }
-  
+
   // Header details
   const headerHtml = `
     <div class="song-header">
@@ -1356,12 +1563,12 @@ function renderActiveSong() {
   const headerDiv = document.createElement('div');
   headerDiv.innerHTML = headerHtml;
   container.appendChild(headerDiv);
-  
+
   // Build parsed lyrics and chords
   const blocks = window.SongParser.parseSongText(song.rawText);
   const body = document.createElement('div');
   body.className = 'song-body';
-  
+
   blocks.forEach(block => {
     if (block.type === 'header') {
       const h = document.createElement('div');
@@ -1371,45 +1578,45 @@ function renderActiveSong() {
     } else if (block.type === 'image') {
       const imgDiv = document.createElement('div');
       imgDiv.className = 'song-image-container';
-      
+
       const img = document.createElement('img');
       img.src = block.src;
       img.className = 'song-image';
       img.alt = 'Scan Note';
-      
+
       imgDiv.appendChild(img);
       body.appendChild(imgDiv);
     } else if (block.type === 'paragraph') {
       const p = document.createElement('div');
       p.className = 'song-paragraph';
-      
+
       block.lines.forEach(line => {
         const lineDiv = document.createElement('div');
-        
+
         if (line.type === 'chord-lyric') {
           lineDiv.className = 'chord-lyric-line';
           line.segments.forEach(seg => {
             const segSpan = document.createElement('span');
             segSpan.className = 'chord-segment';
-            
+
             if (seg.chords && seg.chords.length > 0) {
               let maxChordRightBound = 0;
-              
+
               seg.chords.forEach(cObj => {
                 const transposed = window.Transposer.transposeChord(cObj.chord, state.transposeOffset, state.preferFlats);
                 const cleanDisplay = cleanChordNameForDisplay(transposed);
-                
+
                 const chordSpan = document.createElement('span');
                 chordSpan.className = 'chord';
                 chordSpan.setAttribute('data-chord', cleanDisplay);
                 chordSpan.textContent = cleanDisplay;
-                
+
                 // Position chord relative to segment left boundary
                 chordSpan.style.left = `${cObj.offset / 1000}em`;
                 chordSpan.style.right = 'auto';
-                
+
                 segSpan.appendChild(chordSpan);
-                
+
                 // Calculate visual right-boundary of this chord in Roboto Mono units
                 const chordWidth = cleanDisplay.length * 530;
                 const rightBound = cObj.offset + chordWidth;
@@ -1417,7 +1624,7 @@ function renderActiveSong() {
                   maxChordRightBound = rightBound;
                 }
               });
-              
+
               const lyricWidth = [...seg.text].reduce((sum, c) => sum + window.SongParser.getCharWidth(c), 0);
               const overflow = maxChordRightBound - lyricWidth;
               if (overflow > 0) {
@@ -1426,39 +1633,39 @@ function renderActiveSong() {
                 segSpan.style.paddingRight = `${overflowEm}em`;
               }
             }
-            
+
             const lyricSpan = document.createElement('span');
             lyricSpan.className = 'lyric-text';
             lyricSpan.innerHTML = escapeHTML(seg.text);
             segSpan.appendChild(lyricSpan);
-            
+
             lineDiv.appendChild(segSpan);
           });
         } else if (line.type === 'chord-only') {
           lineDiv.className = 'chord-only-line';
           const rawLine = (line.rawLine || '').trimEnd();
           const chords = window.SongParser.extractChords(rawLine);
-          
+
           if (chords.length === 0) {
             lineDiv.textContent = rawLine;
           } else {
             let htmlResult = '';
             let lastIdx = 0;
-            
+
             chords.forEach(chord => {
               const startIdx = chord.index;
               // Append text/spaces before this chord
               htmlResult += escapeHTML(rawLine.substring(lastIdx, startIdx));
-              
+
               // Transpose and clean
               const transposed = window.Transposer.transposeChord(chord.text, state.transposeOffset, state.preferFlats);
               const cleanDisplay = cleanChordNameForDisplay(transposed);
-              
+
               // Render chord in-flow
               htmlResult += `<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>`;
               lastIdx = startIdx + chord.text.length;
             });
-            
+
             // Append trailing characters
             htmlResult += escapeHTML(rawLine.substring(lastIdx));
             lineDiv.innerHTML = htmlResult;
@@ -1468,17 +1675,17 @@ function renderActiveSong() {
           lineDiv.className = 'lyric-only-line';
           lineDiv.textContent = line.text;
         }
-        
+
         p.appendChild(lineDiv);
       });
-      
+
       body.appendChild(p);
     }
   });
-  
+
   container.appendChild(body);
   el.songDisplayArea.appendChild(container);
-  
+
   // Re-bind click handler on the newly rendered edit button
   document.getElementById('edit-active-btn').addEventListener('click', () => {
     openSongModal(song);
@@ -1488,7 +1695,7 @@ function renderActiveSong() {
 // Auto-Scroll Loop
 function toggleAutoScroll() {
   state.isScrolling = !state.isScrolling;
-  
+
   if (state.isScrolling) {
     el.scrollToggleBtn.textContent = 'Pause';
     el.scrollToggleBtn.classList.add('active');
@@ -1506,20 +1713,36 @@ function toggleAutoScroll() {
   }
 }
 
+function getRowHeight() {
+  if (!el.songDisplayArea) return 32;
+  const sampleLine = el.songDisplayArea.querySelector('.chord-lyric-line, .chord-only-line, .lyric-only-line');
+  if (sampleLine) {
+    const height = sampleLine.offsetHeight;
+    if (height > 0) return height;
+  }
+  const baseSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  return 1.8 * baseSize * state.fontSize;
+}
+
 function autoScrollStep(timestamp) {
   if (!state.isScrolling) return;
-  
-  const elapsed = timestamp - lastScrollTime;
-  
-  // Speed factor: larger scrollSpeed maps to more pixels per frame
-  // e.g. speed 1 -> 0.1px per millisecond, speed 10 -> 1px per millisecond
-  const speedRatio = state.scrollSpeed * 0.015;
+
+  let elapsed = timestamp - lastScrollTime;
+  // Cap elapsed time to 50ms to prevent speed jumps during lag spikes or tab switching
+  if (elapsed > 50) {
+    elapsed = 50;
+  }
+
+  // 5 levels: 1 = min (1 row in 1.0 sec), 5 = max (1 row in 0.5 sec)
+  const clampedSpeed = Math.max(1, Math.min(5, state.scrollSpeed));
+  const T = 1.0 - (clampedSpeed - 1) * 0.025; // 1->1.0s, 2->0.875s, 3->0.75s, 4->0.625s, 5->0.5s
+  const speedRatio = getRowHeight() / (T * 1000);
   const scrollDelta = elapsed * speedRatio;
-  
-  if (scrollDelta >= 0.5) {
+
+  if (scrollDelta > 0) {
     el.songViewport.scrollTop += scrollDelta;
     lastScrollTime = timestamp;
-    
+
     // Check if we hit the bottom of the viewport
     const maxScrollTop = el.songViewport.scrollHeight - el.songViewport.clientHeight;
     if (el.songViewport.scrollTop >= maxScrollTop - 2) {
@@ -1527,7 +1750,7 @@ function autoScrollStep(timestamp) {
       return;
     }
   }
-  
+
   scrollAnimationId = requestAnimationFrame(autoScrollStep);
 }
 
@@ -1537,7 +1760,7 @@ async function toggleWakeLock() {
     showToast("Screen Wake Lock not supported on this browser.");
     return;
   }
-  
+
   if (state.wakeLock) {
     // Release active wake lock
     try {
@@ -1554,7 +1777,7 @@ async function toggleWakeLock() {
       state.wakeLock = await navigator.wakeLock.request('screen');
       el.wakelockIndicator.style.display = 'inline-block';
       showToast("Screen Lock active. Screen will stay on.");
-      
+
       // Handle automatic release on minimize/tab swap
       state.wakeLock.addEventListener('release', () => {
         state.wakeLock = null;
@@ -1570,25 +1793,25 @@ async function toggleWakeLock() {
 // Chord Tooltip Hover Handlers
 function handleChordTooltipOpen(e) {
   if (!e.target.classList.contains('chord')) return;
-  
+
   const chordName = e.target.getAttribute('data-chord');
   state.activeTooltipChord = chordName;
   state.hoveredChordElement = e.target;
-  
+
   // Render SVG diagram
   const svgHtml = window.ChordDB.renderChordDiagram(chordName, state.instrument);
   el.chordTooltip.innerHTML = svgHtml;
   el.chordTooltip.classList.add('active');
-  
+
   // Position above the chord element
   positionTooltip(e.target);
 }
 
 function handleChordTooltipClose(e) {
   if (!e.target.classList.contains('chord')) return;
-  
+
   state.hoveredChordElement = null;
-  
+
   // Clear only if it is not pinned/tapped
   if (!state.pinnedChordElement) {
     el.chordTooltip.classList.remove('active');
@@ -1603,7 +1826,7 @@ function handleChordTooltipTap(e) {
   // If clicked a chord
   if (e.target.classList.contains('chord')) {
     e.stopPropagation(); // prevent closing immediately
-    
+
     // If it's already pinned, and we clicked it again, unpin it
     if (state.pinnedChordElement === e.target) {
       el.chordTooltip.classList.remove('active');
@@ -1613,7 +1836,7 @@ function handleChordTooltipTap(e) {
       // Pin new chord element
       state.pinnedChordElement = e.target;
       const chordName = e.target.getAttribute('data-chord');
-      
+
       const svgHtml = window.ChordDB.renderChordDiagram(chordName, state.instrument);
       el.chordTooltip.innerHTML = svgHtml;
       el.chordTooltip.classList.add('active');
@@ -1621,7 +1844,7 @@ function handleChordTooltipTap(e) {
     }
     return;
   }
-  
+
   // Clicked elsewhere - dismiss pinned tooltips
   if (state.pinnedChordElement) {
     el.chordTooltip.classList.remove('active');
@@ -1633,11 +1856,11 @@ function handleChordTooltipTap(e) {
 function positionTooltip(targetEl) {
   const rect = targetEl.getBoundingClientRect();
   const tooltipRect = el.chordTooltip.getBoundingClientRect();
-  
+
   // Position above chord
   let top = rect.top - 5;
   let left = rect.left + rect.width / 2;
-  
+
   // Bound checks
   if (top - tooltipRect.height < 0) {
     // If it goes off-screen top, show below chord
@@ -1646,15 +1869,15 @@ function positionTooltip(targetEl) {
   } else {
     el.chordTooltip.style.transform = 'translate(-50%, -105%)';
   }
-  
+
   // Boundary check on sides
-  if (left - tooltipRect.width/2 < 10) {
-    left = tooltipRect.width/2 + 10;
-  } else if (left + tooltipRect.width/2 > window.innerWidth - 10) {
-    left = window.innerWidth - tooltipRect.width/2 - 10;
+  if (left - tooltipRect.width / 2 < 10) {
+    left = tooltipRect.width / 2 + 10;
+  } else if (left + tooltipRect.width / 2 > window.innerWidth - 10) {
+    left = window.innerWidth - tooltipRect.width / 2 - 10;
   }
-  
-  el.chordTooltip.style.top = `${top}px` ;
+
+  el.chordTooltip.style.top = `${top}px`;
   el.chordTooltip.style.left = `${left}px`;
 }
 
@@ -1667,10 +1890,10 @@ function openSongModal(song = null) {
   el.formKey.value = '';
   el.formRtl.checked = false;
   el.formText.value = '';
-  
+
   if (el.formImportFile) el.formImportFile.value = '';
   if (el.importStatus) el.importStatus.textContent = '';
-  
+
   if (song) {
     // Editing mode
     el.modalTitle.textContent = "Edit Song";
@@ -1688,7 +1911,7 @@ function openSongModal(song = null) {
     el.deleteSongBtn.style.display = 'none';
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'block';
   }
-  
+
   el.songModal.classList.add('active');
   el.formTitle.focus();
 }
@@ -1700,6 +1923,32 @@ function closeSongModal() {
 // ==========================================
 // SETLIST FEATURE HELPER & RENDER FUNCTIONS
 // ==========================================
+
+// Export single setlist to file
+function exportSetlistToFile(setlist) {
+  if (!setlist) {
+    showToast("No setlist to export.");
+    return;
+  }
+
+  const jsonContent = JSON.stringify(setlist, null, 2);
+  const safeName = setlist.name.replace(/[^a-zA-Z0-9\u0590-\u05FF]/g, '_').toLowerCase();
+  const filename = `setlist_${safeName}.json`;
+
+  if (typeof AndroidApp !== 'undefined' && AndroidApp.shareTextFile) {
+    AndroidApp.shareTextFile(filename, jsonContent);
+    showToast("Export triggered via system share sheet.");
+  } else {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonContent);
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", filename);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    showToast(`Setlist "${setlist.name}" exported.`);
+  }
+}
 
 function renderToolbarSetlistSelect() {
   if (!el.toolbarSetlistSelect) return;
@@ -1724,22 +1973,22 @@ function renderSidebar() {
   if (state.activeTab === 'songs') {
     el.tabSongsBtn.classList.add('active');
     el.tabSetlistsBtn.classList.remove('active');
-    
+
     el.searchContainer.style.display = 'block';
     el.songList.style.display = 'block';
     el.songsFooter.style.display = 'flex';
-    
+
     el.setlistList.style.display = 'none';
     el.setlistEditor.style.display = 'none';
     el.setlistsFooter.style.display = 'none';
   } else {
     el.tabSongsBtn.classList.remove('active');
     el.tabSetlistsBtn.classList.add('active');
-    
+
     el.searchContainer.style.display = 'none';
     el.songList.style.display = 'none';
     el.songsFooter.style.display = 'none';
-    
+
     if (state.activeSetlistId) {
       el.setlistList.style.display = 'none';
       el.setlistsFooter.style.display = 'none';
@@ -1756,7 +2005,7 @@ function renderSidebar() {
 
 function renderSetlistsList() {
   el.setlistList.innerHTML = '';
-  
+
   if (state.setlists.length === 0) {
     el.setlistList.innerHTML = `
       <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">
@@ -1765,7 +2014,7 @@ function renderSetlistsList() {
     `;
     return;
   }
-  
+
   state.setlists.forEach(setlist => {
     const item = document.createElement('div');
     item.className = 'song-item';
@@ -1774,10 +2023,10 @@ function renderSetlistsList() {
     item.style.alignItems = 'center';
     item.style.justifyContent = 'space-between';
     item.style.gap = '0.5rem';
-    
+
     const count = setlist.songs.length;
     const countLabel = count === 1 ? '1 song' : `${count} songs`;
-    
+
     item.innerHTML = `
       <div style="flex: 1; min-width: 0;">
         <span class="song-title" style="display: block; margin-bottom: 0.25rem;">${escapeHTML(setlist.name)}</span>
@@ -1785,15 +2034,30 @@ function renderSetlistsList() {
           <span>${countLabel}</span>
         </div>
       </div>
-      <button class="remove-setlist-btn" title="Delete Setlist" style="color: #ef4444; border: none; background: transparent; font-size: 1.1rem; width: 24px; height: 24px; padding: 0; line-height: 1; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: transform 0.15s ease;">×</button>
+      <div style="display: flex; gap: 0.2rem; align-items: center; flex-shrink: 0;">
+        <button class="export-setlist-btn" title="Export Setlist" style="color: var(--text-secondary); border: none; background: transparent; width: 28px; height: 28px; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s, transform 0.15s ease; border-radius: 4px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
+        <button class="remove-setlist-btn" title="Delete Setlist" style="color: #ef4444; border: none; background: transparent; font-size: 1.2rem; width: 28px; height: 28px; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s, transform 0.15s ease; border-radius: 4px;">×</button>
+      </div>
     `;
-    
+
     item.addEventListener('click', () => {
       state.activeSetlistId = setlist.id;
       state.activeSetlistSongIndex = null;
       renderSidebar();
     });
-    
+
+    const exportBtn = item.querySelector('.export-setlist-btn');
+    exportBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // prevent opening the setlist editor
+      exportSetlistToFile(setlist);
+    });
+
     const deleteBtn = item.querySelector('.remove-setlist-btn');
     deleteBtn.addEventListener('click', async (e) => {
       e.stopPropagation(); // prevent opening the setlist editor
@@ -1817,7 +2081,7 @@ function renderSetlistsList() {
         }
       }
     });
-    
+
     el.setlistList.appendChild(item);
   });
 }
@@ -1825,9 +2089,9 @@ function renderSetlistsList() {
 function renderSetlistEditor() {
   const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
   if (!setlist) return;
-  
+
   el.setlistNameInput.value = setlist.name;
-  
+
   // Populate songs dropdown
   el.setlistAddSongSelect.innerHTML = '<option value="">+ Add Song to Setlist...</option>';
   state.songs.forEach(song => {
@@ -1836,10 +2100,10 @@ function renderSetlistEditor() {
     opt.textContent = `${song.title} (${song.artist})`;
     el.setlistAddSongSelect.appendChild(opt);
   });
-  
+
   // Render songs inside setlist
   el.setlistSongsContainer.innerHTML = '';
-  
+
   if (setlist.songs.length === 0) {
     el.setlistSongsContainer.innerHTML = `
       <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">
@@ -1848,22 +2112,22 @@ function renderSetlistEditor() {
     `;
     return;
   }
-  
+
   setlist.songs.forEach((item, index) => {
     const song = state.songs.find(s => s.id === item.songId);
     if (!song) return; // song might have been deleted from global songs
-    
+
     const row = document.createElement('div');
     row.className = 'setlist-song-row';
-    
+
     let displayKey = 'Orig';
     if (song.key) {
       const transposed = window.Transposer.transposeChord(song.key, item.transposeOffset || 0, state.preferFlats);
       displayKey = cleanChordNameForDisplay(transposed);
     }
-    
+
     const isRtlStyle = song.isRTL ? 'dir="rtl" style="text-align: right;"' : '';
-    
+
     row.innerHTML = `
       <div class="setlist-song-info" ${isRtlStyle}>
         <div class="setlist-song-title">${escapeHTML(song.title)}</div>
@@ -1876,35 +2140,35 @@ function renderSetlistEditor() {
         <button class="setlist-row-btn remove-song-btn" title="Remove" style="color: #ef4444;">×</button>
       </div>
     `;
-    
+
     row.querySelector('.setlist-song-info').addEventListener('click', () => {
       state.currentSongId = song.id;
       localStorage.setItem('lastViewedSongId', song.id);
-      
+
       state.activeSetlistSongIndex = index;
       state.transposeOffset = item.transposeOffset || 0;
       el.transposeVal.textContent = (state.transposeOffset > 0 ? '+' : '') + state.transposeOffset;
-      
+
       if (state.isScrolling) toggleAutoScroll();
-      
+
       renderSongList();
       renderActiveSong();
-      
+
       el.sidebar.classList.remove('active');
       el.songViewport.scrollTop = 0;
     });
-    
+
     row.querySelector('.move-up-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (index > 0) {
         const temp = setlist.songs[index];
         setlist.songs[index] = setlist.songs[index - 1];
         setlist.songs[index - 1] = temp;
-        
+
         try {
           if (db) await dbPutSetlist(db, setlist);
         } catch (err) { console.error(err); }
-        
+
         if (state.activeSetlistId === setlist.id) {
           if (state.activeSetlistSongIndex === index) {
             state.activeSetlistSongIndex = index - 1;
@@ -1912,23 +2176,23 @@ function renderSetlistEditor() {
             state.activeSetlistSongIndex = index;
           }
         }
-        
+
         renderSetlistEditor();
         renderActiveSong();
       }
     });
-    
+
     row.querySelector('.move-down-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (index < setlist.songs.length - 1) {
         const temp = setlist.songs[index];
         setlist.songs[index] = setlist.songs[index + 1];
         setlist.songs[index + 1] = temp;
-        
+
         try {
           if (db) await dbPutSetlist(db, setlist);
         } catch (err) { console.error(err); }
-        
+
         if (state.activeSetlistId === setlist.id) {
           if (state.activeSetlistSongIndex === index) {
             state.activeSetlistSongIndex = index + 1;
@@ -1936,20 +2200,20 @@ function renderSetlistEditor() {
             state.activeSetlistSongIndex = index;
           }
         }
-        
+
         renderSetlistEditor();
         renderActiveSong();
       }
     });
-    
+
     row.querySelector('.remove-song-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
       setlist.songs.splice(index, 1);
-      
+
       try {
         if (db) await dbPutSetlist(db, setlist);
       } catch (err) { console.error(err); }
-      
+
       if (state.activeSetlistId === setlist.id) {
         if (state.activeSetlistSongIndex === index) {
           state.activeSetlistSongIndex = null;
@@ -1957,11 +2221,11 @@ function renderSetlistEditor() {
           state.activeSetlistSongIndex--;
         }
       }
-      
+
       renderSetlistEditor();
       renderActiveSong();
     });
-    
+
     el.setlistSongsContainer.appendChild(row);
   });
 }
@@ -1969,23 +2233,23 @@ function renderSetlistEditor() {
 function navigateToSetlistSong(index) {
   const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
   if (!setlist || index < 0 || index >= setlist.songs.length) return;
-  
+
   const item = setlist.songs[index];
   const song = state.songs.find(s => s.id === item.songId);
   if (!song) return;
-  
+
   state.currentSongId = song.id;
   localStorage.setItem('lastViewedSongId', song.id);
-  
+
   state.activeSetlistSongIndex = index;
   state.transposeOffset = item.transposeOffset || 0;
   el.transposeVal.textContent = (state.transposeOffset > 0 ? '+' : '') + state.transposeOffset;
-  
+
   if (state.isScrolling) toggleAutoScroll();
-  
+
   renderSongList();
   renderActiveSong();
-  
+
   el.songViewport.scrollTop = 0;
 }
 

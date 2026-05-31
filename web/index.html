@@ -78,13 +78,22 @@
         </button>
       </div>
       
-      <div class="sidebar-footer" id="setlists-footer" style="display: none;">
-        <button class="btn btn-primary" id="new-setlist-btn" style="padding: 0.6rem 0.8rem; font-size: 0.85rem; width: 100%;">
+      <div class="sidebar-footer" id="setlists-footer" style="display: none; gap: 0.5rem;">
+        <button class="btn btn-primary" id="new-setlist-btn" style="padding: 0.6rem 0.8rem; font-size: 0.85rem; flex: 1;">
           <!-- Plus Icon SVG -->
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
           </svg>
           Create Setlist
+        </button>
+        <button class="btn" id="main-import-setlist-btn" style="padding: 0.6rem 0.8rem; font-size: 0.85rem; flex: 1;">
+          <!-- Import Icon SVG -->
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Import
         </button>
         <input type="file" id="setlists-import-file" accept=".json" style="display: none;">
       </div>
@@ -135,10 +144,30 @@
 
         <!-- Auto Scroll controls -->
         <div class="control-group">
-          <span class="control-label">Scroll</span>
           <button class="btn autoscroll-btn" id="scroll-toggle-btn" style="padding: 4px 8px; flex: none;">Play</button>
-          <span class="control-label" style="font-size: 0.65rem; margin-left: 0.3rem;">Speed</span>
-          <input type="range" id="scroll-speed-slider" min="1" max="10" value="3" style="width: 70px; cursor: pointer;">
+          <span class="control-label" style="font-size: 0.65rem; margin-left: 0.2rem;">Speed</span>
+          <input type="range" id="scroll-speed-slider" min="1" max="5" value="3" style="width: 60px; cursor: pointer;">
+        </div>
+
+        <!-- Metronome controls -->
+        <div class="control-group">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary); margin-right: 0.2rem; flex-shrink: 0;" title="Metronome">
+            <path d="M12 2L2 22h20L12 2z"></path>
+            <path d="M12 5v13"></path>
+            <circle cx="12" cy="18" r="1"></circle>
+            <path d="M16 11l-4 4"></path>
+          </svg>
+          <span class="metro-led" id="metro-led" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--text-secondary); display: inline-block; margin-right: 0.2rem; transition: background-color 0.05s ease, box-shadow 0.05s ease; flex-shrink: 0;"></span>
+          <button class="control-btn" id="metro-toggle-btn" title="Toggle Metronome Mode (Off / Visual / Audio)" style="font-size: 0.8rem; width: auto; padding: 0 4px; margin-right: 0.2rem; flex-shrink: 0;">🔇</button>
+          <button class="control-btn" id="metro-bpm-dec-btn" style="width: 20px; height: 20px; font-size: 0.75rem; flex-shrink: 0;">-</button>
+          <span class="control-value" id="metro-bpm-val" style="font-size: 0.8rem; min-width: 28px; flex-shrink: 0;">120</span>
+          <button class="control-btn" id="metro-bpm-inc-btn" style="width: 20px; height: 20px; font-size: 0.75rem; flex-shrink: 0;">+</button>
+          <select class="select-theme" id="metro-beats-select" style="font-size: 0.75rem; padding: 2px 4px; width: 44px; cursor: pointer; margin-left: 0.2rem; flex-shrink: 0;">
+            <option value="4">4/4</option>
+            <option value="3">3/4</option>
+            <option value="2">2/4</option>
+            <option value="6">6/8</option>
+          </select>
         </div>
 
         <!-- Setlist Selection -->

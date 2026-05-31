@@ -363,7 +363,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 2rem 3rem;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 
 @media (max-width: 480px) {
@@ -558,6 +558,16 @@ body {
   background-color: #22c55e;
   box-shadow: 0 0 8px #22c55e;
   display: inline-block;
+}
+
+/* Metronome LED Flash Indicator */
+.metro-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-secondary);
+  display: inline-block;
+  transition: background-color 0.05s ease, box-shadow 0.05s ease;
 }
 
 /* Auto-scroll active indicator */
@@ -901,8 +911,16 @@ body {
   cursor: not-allowed;
 }
 
+.export-setlist-btn:hover {
+  color: var(--accent-color) !important;
+  background-color: var(--accent-light) !important;
+}
+
 /* Floating Setlist Gig Navigation Bar */
 .setlist-gig-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -913,6 +931,7 @@ body {
   margin-bottom: 1.5rem;
   box-shadow: var(--shadow);
   gap: 1rem;
+  direction: ltr;
 }
 
 .gig-nav-btn {
