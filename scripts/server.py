@@ -11,7 +11,12 @@ import json
 import subprocess
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 
-PORT = 8000
+PORT = 8080
+if len(sys.argv) > 1:
+    try:
+        PORT = int(sys.argv[1])
+    except ValueError:
+        pass
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 WEB_DIR = os.path.join(PROJECT_ROOT, 'web')

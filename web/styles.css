@@ -960,3 +960,50 @@ body {
   color: var(--text-secondary);
   font-weight: 500;
 }
+
+/* Fullscreen / Maximize Mode Layout */
+.app-container.fullscreen {
+  grid-template-columns: 1fr;
+}
+
+.app-container.fullscreen .sidebar {
+  display: none !important;
+}
+
+.app-container.fullscreen .toolbar {
+  display: none !important;
+}
+
+/* Floating Restore Button styling */
+.restore-btn {
+  position: fixed;
+  top: 1rem;
+  right: 1.5rem;
+  z-index: 1000;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background-color 0.2s, border-color 0.2s;
+  padding: 0;
+}
+
+.restore-btn:hover {
+  transform: scale(1.1) translateY(-2px);
+  background-color: var(--accent-light);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.restore-btn svg {
+  display: block;
+}

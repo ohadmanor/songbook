@@ -968,6 +968,53 @@ body {
   font-weight: 500;
 }
 
+/* Fullscreen / Maximize Mode Layout */
+.app-container.fullscreen {
+  grid-template-columns: 1fr;
+}
+
+.app-container.fullscreen .sidebar {
+  display: none !important;
+}
+
+.app-container.fullscreen .toolbar {
+  display: none !important;
+}
+
+/* Floating Restore Button styling */
+.restore-btn {
+  position: fixed;
+  top: 1rem;
+  right: 1.5rem;
+  z-index: 1000;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background-color 0.2s, border-color 0.2s;
+  padding: 0;
+}
+
+.restore-btn:hover {
+  transform: scale(1.1) translateY(-2px);
+  background-color: var(--accent-light);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.restore-btn svg {
+  display: block;
+}
+
 </style>
 </head>
 <body>
@@ -1161,6 +1208,13 @@ body {
             <option value="oled">OLED Black</option>
           </select>
         </div>
+
+        <!-- Maximize Button -->
+        <button class="btn" id="maximize-btn" title="Maximize Song (Fullscreen Mode)" style="flex: none; padding: 6px 10px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display: block;">
+            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+          </svg>
+        </button>
       </header>
 
       <!-- Content Viewer -->
@@ -1231,6 +1285,13 @@ body {
 
   <!-- Toast Notification Overlay -->
   <div class="toast" id="toast-notify">Action Successful</div>
+
+  <!-- Floating Restore Toolbar Button -->
+  <button class="btn restore-btn" id="restore-btn" title="Exit Fullscreen" style="display: none;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
+    </svg>
+  </button>
 
   <!-- JavaScript Modules -->
   <script>
@@ -6407,7 +6468,8 @@ let state = {
   metroBeats: 4,
   metroMode: 'off', // 'off' | 'visual' | 'audio'
   metroBeatCounter: 0,
-  metroIntervalId: null
+  metroIntervalId: null,
+  isFullscreen: false
 };
 
 // Safe localStorage wrapper for strict/incognito environments
@@ -6466,6 +6528,8 @@ const el = {
   songDisplayArea: document.getElementById('song-display-area'),
   chordTooltip: document.getElementById('chord-tooltip'),
   toastNotify: document.getElementById('toast-notify'),
+  maximizeBtn: document.getElementById('maximize-btn'),
+  restoreBtn: document.getElementById('restore-btn'),
 
   // Setlist feature elements
   tabSongsBtn: document.getElementById('tab-songs-btn'),
@@ -6982,6 +7046,25 @@ function bindEvents(db) {
   // Mobile Nav Buttons
   el.showSidebarBtn.addEventListener('click', () => el.sidebar.classList.add('active'));
   el.hideSidebarBtn.addEventListener('click', () => el.sidebar.classList.remove('active'));
+
+  // Maximize / Fullscreen toggle
+  if (el.maximizeBtn) {
+    el.maximizeBtn.addEventListener('click', () => {
+      toggleFullscreen(true);
+    });
+  }
+  if (el.restoreBtn) {
+    el.restoreBtn.addEventListener('click', () => {
+      toggleFullscreen(false);
+    });
+  }
+
+  // Escape key to exit fullscreen
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.isFullscreen) {
+      toggleFullscreen(false);
+    }
+  });
 
   // Modals opening/closing
   el.newSongBtn.addEventListener('click', () => openSongModal());
@@ -8644,6 +8727,18 @@ async function saveSetlistTransposeOffset() {
         console.error("Failed to save setlist transpose offset:", err);
       }
     }
+  }
+}
+
+function toggleFullscreen(enable) {
+  state.isFullscreen = enable;
+  const appContainer = document.querySelector('.app-container');
+  if (enable) {
+    appContainer.classList.add('fullscreen');
+    if (el.restoreBtn) el.restoreBtn.style.display = 'flex';
+  } else {
+    appContainer.classList.remove('fullscreen');
+    if (el.restoreBtn) el.restoreBtn.style.display = 'none';
   }
 }
 

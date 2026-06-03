@@ -30,7 +30,8 @@ let state = {
   metroBeats: 4,
   metroMode: 'off', // 'off' | 'visual' | 'audio'
   metroBeatCounter: 0,
-  metroIntervalId: null
+  metroIntervalId: null,
+  isFullscreen: false
 };
 
 // Safe localStorage wrapper for strict/incognito environments
@@ -89,6 +90,8 @@ const el = {
   songDisplayArea: document.getElementById('song-display-area'),
   chordTooltip: document.getElementById('chord-tooltip'),
   toastNotify: document.getElementById('toast-notify'),
+  maximizeBtn: document.getElementById('maximize-btn'),
+  restoreBtn: document.getElementById('restore-btn'),
 
   // Setlist feature elements
   tabSongsBtn: document.getElementById('tab-songs-btn'),
@@ -605,6 +608,25 @@ function bindEvents(db) {
   // Mobile Nav Buttons
   el.showSidebarBtn.addEventListener('click', () => el.sidebar.classList.add('active'));
   el.hideSidebarBtn.addEventListener('click', () => el.sidebar.classList.remove('active'));
+
+  // Maximize / Fullscreen toggle
+  if (el.maximizeBtn) {
+    el.maximizeBtn.addEventListener('click', () => {
+      toggleFullscreen(true);
+    });
+  }
+  if (el.restoreBtn) {
+    el.restoreBtn.addEventListener('click', () => {
+      toggleFullscreen(false);
+    });
+  }
+
+  // Escape key to exit fullscreen
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.isFullscreen) {
+      toggleFullscreen(false);
+    }
+  });
 
   // Modals opening/closing
   el.newSongBtn.addEventListener('click', () => openSongModal());
@@ -2267,6 +2289,18 @@ async function saveSetlistTransposeOffset() {
         console.error("Failed to save setlist transpose offset:", err);
       }
     }
+  }
+}
+
+function toggleFullscreen(enable) {
+  state.isFullscreen = enable;
+  const appContainer = document.querySelector('.app-container');
+  if (enable) {
+    appContainer.classList.add('fullscreen');
+    if (el.restoreBtn) el.restoreBtn.style.display = 'flex';
+  } else {
+    appContainer.classList.remove('fullscreen');
+    if (el.restoreBtn) el.restoreBtn.style.display = 'none';
   }
 }
 
