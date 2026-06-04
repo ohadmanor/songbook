@@ -29,7 +29,7 @@ graph TD
     A[web/ Front-end] -->|IndexedDB| B(Local Browser Storage)
     A -->|API: /api/save-song| C[scripts/server.py]
     C -->|Updates| D[web/songs-data.js]
-    C -->|Bundles| E[songbook.html]
+    C -->|Bundles| E[outputs/songbook.html]
     A -->|Sync script| F[android/app/src/main/assets/www]
 ```
 
@@ -38,8 +38,8 @@ A pure, framework-less frontend built with standard HTML5, CSS3, and Vanilla Jav
 * **IndexedDB Store**: Manages custom user-added songs and setlist data locally within the browser.
 * **Static Fallback**: Reads default songs from [songs-data.js](file:///c:/Develop/Github/songbook/web/songs-data.js) (automatically updated by the build pipeline).
 
-### 2. Standalone HTML (`songbook.html`)
-A single, highly portable, standalone application generated at the root of the workspace. All JS libraries, stylesheets, and song databases are fully inlined.
+### 2. Standalone HTML (`outputs/songbook.html`)
+A single, highly portable, standalone application generated in the `outputs/` directory of the workspace. All JS libraries, stylesheets, and song databases are fully inlined.
 
 ### 3. Android WebView Integration (`android/`)
 A native Android project configured to wrap the web assets locally in a WebView. Web assets are hosted in `android/app/src/main/assets/www` to run offline without any remote network requests.
@@ -57,10 +57,10 @@ python scripts/server.py
 ```
 * **Default Port**: `8080` (can be overridden, e.g. `python scripts/server.py 9000`).
 * Serves the front-end at `http://localhost:8080`.
-* Listens to the `/api/save-song` endpoint and automatically writes edits to `scripts/manual_edits.json`, updates `web/songs-data.js`, and regenerates the standalone `songbook.html`.
+* Listens to the `/api/save-song` endpoint and automatically writes edits to `scripts/manual_edits.json`, updates `web/songs-data.js`, and regenerates the standalone `outputs/songbook.html`.
 
 ### 2. Standalone HTML Bundler
-Inlines all frontend assets (HTML, CSS, JS, external libraries, and song data) into a single standalone file at the root:
+Inlines all frontend assets (HTML, CSS, JS, external libraries, and song data) into a single standalone file in `outputs/`:
 ```bash
 python scripts/bundle_app.py
 ```
@@ -90,7 +90,7 @@ Run the following script to bundle your files into a single HTML document:
 ```bash
 python scripts/bundle_app.py
 ```
-The output file [songbook.html](file:///c:/Develop/Github/songbook/songbook.html) can be opened in any browser.
+The output file [songbook.html](file:///c:/Develop/Github/songbook/outputs/songbook.html) can be opened in any browser.
 
 ### 2. Android APK Release Build
 1. Sync the latest web changes with the Android assets folder:
@@ -103,4 +103,4 @@ The output file [songbook.html](file:///c:/Develop/Github/songbook/songbook.html
    $env:JAVA_HOME="C:\Program Files\Android\openjdk\jdk-21.0.8" # Set JDK home if necessary
    ./gradlew assembleRelease
    ```
-3. The resulting APK will be built at `android/app/build/outputs/apk/release/app-release-unsigned.apk`.
+3. The resulting signed APK will be built at `android/app/build/outputs/apk/release/app-release.apk`.

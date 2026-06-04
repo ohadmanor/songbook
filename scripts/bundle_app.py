@@ -14,7 +14,9 @@ def main():
     project_root = os.path.dirname(script_dir)
     
     web_dir = os.path.join(project_root, 'web')
-    output_html_file = os.path.join(project_root, 'songbook.html')
+    outputs_dir = os.path.join(project_root, 'outputs')
+    os.makedirs(outputs_dir, exist_ok=True)
+    output_html_file = os.path.join(outputs_dir, 'songbook.html')
     
     # 1. Read index.html
     index_path = os.path.join(web_dir, 'index.html')
