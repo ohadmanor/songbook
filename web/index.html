@@ -15,7 +15,7 @@
       <div class="sidebar-header">
         <div style="display: flex; align-items: center; gap: 0.5rem;">
           <span class="logo">ChordBook</span>
-          <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700; background: var(--border-color); padding: 2px 6px; border-radius: 12px; border: 1px solid var(--border-color); line-height: 1;">v1.1.2</span>
+          <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700; background: var(--border-color); padding: 2px 6px; border-radius: 12px; border: 1px solid var(--border-color); line-height: 1;">v1.2.0</span>
         </div>
         <button class="btn mobile-menu-btn" id="hide-sidebar-btn" style="padding: 4px 8px; flex: none;">×</button>
       </div>
@@ -65,17 +65,22 @@
       </div>
       
       <!-- Sidebar Action Footers -->
-      <div class="sidebar-footer" id="songs-footer">
-        <button class="btn btn-primary" id="new-song-btn">
+      <div class="sidebar-footer" id="songs-footer" style="flex-direction: column; gap: 0.5rem;">
+        <button class="btn btn-primary" id="new-song-btn" style="width: 100%;">
           <!-- Plus Icon SVG -->
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
           </svg>
           Add Song
         </button>
-        <button class="btn" id="export-db-btn" title="Export all songs to JSON backup">
-          Backup
-        </button>
+        <div style="display: flex; gap: 0.5rem; width: 100%;">
+          <button class="btn" id="export-db-btn" title="Export all songs to JSON backup" style="flex: 1;">
+            Backup
+          </button>
+          <button class="btn" id="restore-backup-btn" title="Restore songs data from the backup file on disk" style="flex: 1;">
+            Restore
+          </button>
+        </div>
       </div>
       
       <div class="sidebar-footer" id="setlists-footer" style="display: none; gap: 0.5rem;">
@@ -258,8 +263,17 @@
           </div>
         </div>
         
+        <div class="form-group" id="remarks-group" style="display: none;">
+          <label for="form-remarks">Remarks / Comments (Only for this Setlist)</label>
+          <input type="text" class="form-control" id="form-remarks" placeholder="e.g. Play intro twice, fade out on outro...">
+        </div>
+        
         <div class="form-group">
           <label for="form-text">Lyrics and Chords Sheet</label>
+          <div class="editor-toolbar" style="display: flex; gap: 0.4rem; margin-bottom: 0.3rem;">
+            <button type="button" class="btn" id="editor-bold-btn" style="padding: 4px 10px; font-size: 0.75rem; font-weight: 700; flex: none; width: auto; height: auto;">Bold</button>
+            <button type="button" class="btn" id="editor-highlight-btn" style="padding: 4px 10px; font-size: 0.75rem; flex: none; width: auto; height: auto; background-color: var(--accent-light); border-color: var(--accent-color);">Highlight</button>
+          </div>
           <textarea class="form-control textarea-control" id="form-text" placeholder="Type chords directly above lyrics with spaces, like this:&#10;Am             C&#10;This is an example song" required></textarea>
         </div>
       </div>
@@ -271,6 +285,47 @@
       </div>
     </div>
   </div>
+
+  <!-- Restore Confirmation & Change Log Modal -->
+  <div class="modal-overlay" id="restore-confirm-modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2>Restore Database Change Log</h2>
+        <button class="btn" id="close-restore-modal-btn" style="border: none; padding: 4px 8px; font-size: 1.2rem; cursor: pointer;">×</button>
+      </div>
+      <div class="modal-body" style="max-height: 400px; overflow-y: auto; gap: 1rem;">
+        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+          Selected file: <strong id="restore-filename" style="color: var(--text-primary);">None</strong>
+        </p>
+        
+        <!-- Summary Stats -->
+        <div style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
+          <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
+            <div style="font-size: 1.2rem; font-weight: bold; color: #22c55e;" id="restore-added-count">0</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Added</div>
+          </div>
+          <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
+            <div style="font-size: 1.2rem; font-weight: bold; color: #eab308;" id="restore-modified-count">0</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Modified</div>
+          </div>
+          <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
+            <div style="font-size: 1.2rem; font-weight: bold; color: #ef4444;" id="restore-deleted-count">0</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Deleted</div>
+          </div>
+        </div>
+
+        <div id="restore-changelog-details" style="display: flex; flex-direction: column; gap: 0.8rem;">
+          <!-- Diff sections will be dynamically populated here -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="cancel-restore-modal-btn">Cancel</button>
+        <button class="btn btn-primary" id="confirm-restore-btn" style="background-color: #ef4444; border-color: #ef4444;">Restore Selected Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="restore-file-input" accept=".js,.json" style="display: none;">
 
   <!-- Toast Notification Overlay -->
   <div class="toast" id="toast-notify">Action Successful</div>

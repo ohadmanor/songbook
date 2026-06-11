@@ -164,9 +164,17 @@ function alignChordsAndLyrics(chordLine, lyricLine) {
   
   const lyricOffsets = [0];
   let currentLyricOffset = 0;
-  for (let i = 0; i < lyricLine.length; i++) {
-    currentLyricOffset += getCharWidth(lyricLine[i]);
-    lyricOffsets.push(currentLyricOffset);
+  let jIdx = 0;
+  while (jIdx < lyricLine.length) {
+    if (lyricLine.substring(jIdx, jIdx + 2) === '**' || lyricLine.substring(jIdx, jIdx + 2) === '==') {
+      lyricOffsets.push(currentLyricOffset);
+      lyricOffsets.push(currentLyricOffset);
+      jIdx += 2;
+    } else {
+      currentLyricOffset += getCharWidth(lyricLine[jIdx]);
+      lyricOffsets.push(currentLyricOffset);
+      jIdx++;
+    }
   }
   const lyricWidth = currentLyricOffset;
   

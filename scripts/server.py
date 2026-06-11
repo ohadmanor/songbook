@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import subprocess
+import shutil
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 PORT = 8080
@@ -31,8 +32,86 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == '/api/save-song':
             self.handle_save_song()
+        elif self.path == '/api/delete-song':
+            self.handle_delete_song()
+        elif self.path == '/api/restore-backup':
+            self.handle_restore_backup()
         else:
             self.send_error(404, "Endpoint not found")
+
+    def handle_restore_backup(self):
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            payload = None
+            if content_length > 0:
+                try:
+                    post_data = self.rfile.read(content_length)
+                    payload = json.loads(post_data.decode('utf-8'))
+                except Exception as parse_err:
+                    print(f"[Server] Failed to parse restore payload JSON: {parse_err}")
+            
+            if payload and "songs" in payload:
+                songs_list = payload["songs"]
+                print(f"\n[Server] Performing custom restore with {len(songs_list)} songs...")
+                
+                js_file = os.path.join(WEB_DIR, 'songs-data.js')
+                
+                # Create safety backup of current songs-data.js
+                if os.path.exists(js_file):
+                    safety_backup = js_file + ".pre_restore"
+                    print(f"[Server] Creating safety backup of current songs-data.js at: {safety_backup}")
+                    shutil.copy2(js_file, safety_backup)
+                
+                # Write new songs data
+                import datetime
+                new_version = datetime.datetime.now().isoformat()
+                with open(js_file, 'w', encoding='utf-8') as f:
+                    f.write(f"window.defaultSongsVersion = '{new_version}';\n")
+                    f.write("window.defaultSongs = ")
+                    json.dump(songs_list, f, ensure_ascii=False, indent=2)
+                    f.write(";\n")
+                print(f"[Server] Restored custom songs and updated songs-data.js (Version: {new_version})")
+                
+                # Trigger standalone HTML bundling
+                print("[Server] Triggering standalone HTML bundling...")
+                try:
+                    if SCRIPT_DIR not in sys.path:
+                        sys.path.append(SCRIPT_DIR)
+                    import bundle_app
+                    bundle_app.main()
+                except Exception as e:
+                    print(f"[Server] Error running bundle_app: {e}")
+                
+                # Trigger Android assets synchronization
+                print("[Server] Triggering Android assets synchronization...")
+                try:
+                    import sync_android
+                    sync_android.main()
+                except Exception as e:
+                    print(f"[Server] Error running sync_android: {e}")
+                
+                msg = f"Database restored from custom backup ({len(songs_list)} songs) and rebuilt successfully."
+            else:
+                # Fallback to local default backup file restoration
+                backup_script = os.path.join(SCRIPT_DIR, 'restore_backup.py')
+                print("\n[Server] Triggering backup restoration script...")
+                
+                # Run the restore_backup.py script
+                result = subprocess.run([sys.executable, backup_script], capture_output=True, text=True, check=True)
+                print(f"[Server] Restore script output:\n{result.stdout}")
+                msg = "Songs database restored from default backup file on disk and rebuilt successfully."
+            
+            response = {"status": "success", "message": msg}
+            response_data = json.dumps(response).encode('utf-8')
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(response_data)))
+            self.end_headers()
+            self.wfile.write(response_data)
+        except Exception as e:
+            print(f"[Server] Error handling restore-backup: {e}")
+            self.send_error(500, f"Internal Server Error: {e}")
 
     def handle_save_song(self):
         try:
@@ -158,6 +237,97 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
             
         except Exception as e:
             print(f"[Server] Error handling save-song: {e}")
+            self.send_error(500, f"Internal Server Error: {e}")
+
+    def handle_delete_song(self):
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            payload = json.loads(post_data.decode('utf-8'))
+            id_val = payload.get('id')
+            
+            if not id_val:
+                self.send_error(400, "Missing required field (id)")
+                return
+                
+            # Load existing edits
+            edits = {}
+            if os.path.exists(EDITS_FILE):
+                try:
+                    with open(EDITS_FILE, 'r', encoding='utf-8') as f:
+                        edits = json.load(f)
+                except Exception as e:
+                    print(f"Error loading edits file: {e}")
+            
+            # Find and delete from edits
+            key_to_delete = None
+            for key, val in edits.items():
+                if val.get('id') == id_val:
+                    key_to_delete = key
+                    break
+            if key_to_delete:
+                del edits[key_to_delete]
+                # Write back edits file
+                with open(EDITS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(edits, f, ensure_ascii=False, indent=2)
+                print(f"[Server] Deleted song from edits: '{id_val}'")
+            
+            # Load and update web/songs-data.js
+            js_file = os.path.join(WEB_DIR, 'songs-data.js')
+            songs_list = []
+            if os.path.exists(js_file):
+                try:
+                    with open(js_file, 'r', encoding='utf-8') as f:
+                        js_content = f.read()
+                    
+                    # Extract defaultSongs JSON array
+                    json_start = js_content.find("window.defaultSongs = ")
+                    if json_start != -1:
+                        json_str = js_content[json_start + len("window.defaultSongs = "):].strip()
+                        if json_str.endswith(";"):
+                            json_str = json_str[:-1].strip()
+                        songs_list = json.loads(json_str)
+                except Exception as e:
+                    print(f"[Server] Error reading songs-data.js: {e}")
+
+            # Filter out deleted song
+            new_songs_list = [s for s in songs_list if s.get('id') != id_val]
+            
+            # Save updated songs-data.js back to disk
+            import datetime
+            new_version = datetime.datetime.now().isoformat()
+            try:
+                with open(js_file, 'w', encoding='utf-8') as f:
+                    f.write(f"window.defaultSongsVersion = '{new_version}';\n")
+                    f.write("window.defaultSongs = ")
+                    json.dump(new_songs_list, f, ensure_ascii=False, indent=2)
+                    f.write(";\n")
+                print(f"[Server] Updated songs-data.js after deletion (Version: {new_version})")
+            except Exception as e:
+                print(f"[Server] Error saving songs-data.js: {e}")
+
+            # Trigger bundle_app.py directly to update songbook.html
+            print("[Server] Triggering standalone HTML bundling...")
+            try:
+                if SCRIPT_DIR not in sys.path:
+                    sys.path.append(SCRIPT_DIR)
+                import bundle_app
+                bundle_app.main()
+            except Exception as e:
+                print(f"[Server] Error running bundle_app: {e}")
+            
+            # Respond to client
+            response = {"status": "success", "message": "Song deleted from disk and bundled"}
+            response_data = json.dumps(response).encode('utf-8')
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(response_data)))
+            self.end_headers()
+            self.wfile.write(response_data)
+            
+        except Exception as e:
+            print(f"[Server] Error handling delete-song: {e}")
             self.send_error(500, f"Internal Server Error: {e}")
 
 def main():

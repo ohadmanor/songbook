@@ -664,6 +664,50 @@ body {
   margin-top: 0.5rem;
 }
 
+/* Add/Edit Song Modal specific layout improvements */
+#song-modal .modal-content {
+  max-width: 950px;
+  width: 95%;
+  max-height: 95vh;
+}
+
+#song-modal .modal-body {
+  max-height: calc(95vh - 140px);
+  overflow-y: auto;
+}
+
+#song-modal .textarea-control {
+  min-height: 450px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.95rem;
+}
+
+#song-modal .textarea-control.rtl {
+  direction: rtl;
+  text-align: right;
+}
+
+/* Highlight text formatting in song sheet */
+.song-highlight {
+  background-color: #fef08a; /* Soft bright yellow in light theme */
+  color: #1e293b; /* Dark text for contrast */
+  padding: 0 4px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* For dark / OLED / sepia themes, we override highlight colors */
+[data-theme="dark"] .song-highlight,
+[data-theme="oled"] .song-highlight {
+  background-color: #ca8a04; /* Soft gold/amber in dark mode */
+  color: #ffffff;
+}
+
+[data-theme="sepia"] .song-highlight {
+  background-color: #d97706; /* Warm deep orange/gold in sepia */
+  color: #ffffff;
+}
+
 /* Empty State */
 .empty-state {
   display: flex;

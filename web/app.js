@@ -135,10 +135,25 @@ const el = {
   formKey: document.getElementById('form-key'),
   formRtl: document.getElementById('form-rtl'),
   formText: document.getElementById('form-text'),
+  remarksGroup: document.getElementById('remarks-group'),
+  formRemarks: document.getElementById('form-remarks'),
+  editorBoldBtn: document.getElementById('editor-bold-btn'),
+  editorHighlightBtn: document.getElementById('editor-highlight-btn'),
   importDocxGroup: document.getElementById('import-docx-group'),
   formImportFile: document.getElementById('form-import-file'),
   importStatus: document.getElementById('import-status'),
-  exportDbBtn: document.getElementById('export-db-btn')
+  exportDbBtn: document.getElementById('export-db-btn'),
+  restoreBackupBtn: document.getElementById('restore-backup-btn'),
+  restoreConfirmModal: document.getElementById('restore-confirm-modal'),
+  closeRestoreModalBtn: document.getElementById('close-restore-modal-btn'),
+  cancelRestoreModalBtn: document.getElementById('cancel-restore-modal-btn'),
+  confirmRestoreBtn: document.getElementById('confirm-restore-btn'),
+  restoreFileInput: document.getElementById('restore-file-input'),
+  restoreFilename: document.getElementById('restore-filename'),
+  restoreAddedCount: document.getElementById('restore-added-count'),
+  restoreModifiedCount: document.getElementById('restore-modified-count'),
+  restoreDeletedCount: document.getElementById('restore-deleted-count'),
+  restoreChangelogDetails: document.getElementById('restore-changelog-details')
 };
 
 // Scroll animation variables
@@ -276,6 +291,61 @@ function escapeHTML(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+// Utility to parse dynamic formatting in lyric sheet (bolding & highlighting)
+function formatLyricText(str) {
+  if (!str) return '';
+  let escaped = escapeHTML(str);
+  
+  // Convert standard markdown bold (**text**) and html bold (<b>text</b>)
+  escaped = escaped
+    .replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/&lt;b&gt;([\s\S]*?)&lt;\/b&gt;/g, '<strong>$1</strong>')
+    // Convert standard highlight (==text==) and html highlight (<mark>text</mark>)
+    .replace(/==([\s\S]*?)==/g, '<mark class="song-highlight">$1</mark>')
+    .replace(/&lt;mark&gt;([\s\S]*?)&lt;\/mark&gt;/g, '<mark class="song-highlight">$1</mark>');
+  
+  return escaped;
+}
+
+// Helper for formatSegmentText to maintain bold/highlight states across segment boundaries
+function formatSegmentText(text, state) {
+  let resultHtml = '';
+  
+  // Open active formatting tags at the beginning of the segment
+  if (state.bold) {
+    resultHtml += '<strong>';
+  }
+  if (state.highlight) {
+    resultHtml += '<mark class="song-highlight">';
+  }
+  
+  let i = 0;
+  while (i < text.length) {
+    if (text.substring(i, i + 2) === '**') {
+      state.bold = !state.bold;
+      resultHtml += state.bold ? '<strong>' : '</strong>';
+      i += 2;
+    } else if (text.substring(i, i + 2) === '==') {
+      state.highlight = !state.highlight;
+      resultHtml += state.highlight ? '<mark class="song-highlight">' : '</mark>';
+      i += 2;
+    } else {
+      resultHtml += escapeHTML(text[i]);
+      i++;
+    }
+  }
+  
+  // Close active formatting tags at the end of the segment to keep HTML valid
+  if (state.highlight) {
+    resultHtml += '</mark>';
+  }
+  if (state.bold) {
+    resultHtml += '</strong>';
+  }
+  
+  return resultHtml;
 }
 
 // Clean chord names ending with 0, o, or O to display as 'dim'
@@ -632,6 +702,44 @@ function bindEvents(db) {
   el.newSongBtn.addEventListener('click', () => openSongModal());
   el.closeModalBtn.addEventListener('click', () => closeSongModal());
   el.cancelModalBtn.addEventListener('click', () => closeSongModal());
+  if (el.formRtl) {
+    el.formRtl.addEventListener('change', () => {
+      updateFormTextDirection();
+    });
+  }
+
+  // Editor formatting toolbar selection wrapping helper
+  const wrapTextSelection = (tagOpen, tagClose) => {
+    const textarea = el.formText;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const selectedText = text.substring(start, end);
+    
+    const replacement = tagOpen + selectedText + tagClose;
+    textarea.value = text.substring(0, start) + replacement + text.substring(end);
+    
+    // Restore focus and selection
+    textarea.focus();
+    textarea.selectionStart = start;
+    textarea.selectionEnd = start + replacement.length;
+  };
+
+  if (el.editorBoldBtn) {
+    el.editorBoldBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      wrapTextSelection('**', '**');
+    });
+  }
+
+  if (el.editorHighlightBtn) {
+    el.editorHighlightBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      wrapTextSelection('==', '==');
+    });
+  }
 
   // Save Song Button
   el.saveSongBtn.addEventListener('click', async () => {
@@ -643,6 +751,37 @@ function bindEvents(db) {
 
     if (!title || !rawText) {
       showToast("Title and lyrics content are required.");
+      return;
+    }
+
+    const isSetlistEdit = !!(state.activeSetlistId && state.activeSetlistSongIndex !== null);
+    if (isSetlistEdit) {
+      const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
+      if (setlist && setlist.songs[state.activeSetlistSongIndex]) {
+        const item = setlist.songs[state.activeSetlistSongIndex];
+        const remarks = el.formRemarks ? el.formRemarks.value.trim() : '';
+
+        // Save overrides in the setlist song item
+        item.title = title;
+        item.artist = artist;
+        item.key = key;
+        item.isRTL = isRTL;
+        item.rawText = rawText;
+        item.remarks = remarks;
+
+        try {
+          if (db) {
+            await dbPutSetlist(db, setlist);
+          }
+          showToast("Setlist song updated.");
+          closeSongModal();
+          renderSetlistEditor();
+          renderActiveSong();
+        } catch (e) {
+          console.error(e);
+          showToast("Failed to save setlist song.");
+        }
+      }
       return;
     }
 
@@ -712,6 +851,22 @@ function bindEvents(db) {
     if (!id) return;
 
     if (confirm("Are you sure you want to delete this song permanently?")) {
+      // Attempt to sync delete back to host disk using local server API
+      try {
+        const response = await fetch('/api/delete-song', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        if (response.ok) {
+          console.log("Delete successfully synced to local disk.");
+        } else {
+          console.warn("Failed to sync delete to local disk, status:", response.status);
+        }
+      } catch (err) {
+        console.log("Local sync server unavailable. Deleting locally inside browser only.");
+      }
+
       try {
         if (db) {
           await dbDeleteSong(db, id);
@@ -761,6 +916,299 @@ function bindEvents(db) {
     }
   });
 
+  // Restore Backup Button triggers file input
+  if (el.restoreBackupBtn) {
+    el.restoreBackupBtn.addEventListener('click', () => {
+      el.restoreFileInput.click();
+    });
+  }
+
+  // Handle selected file for restore
+  if (el.restoreFileInput) {
+    el.restoreFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const text = event.target.result;
+          let parsedSongs = null;
+
+          if (file.name.endsWith('.js')) {
+            // Extract window.defaultSongs = [...]
+            const match = text.match(/window\.defaultSongs\s*=\s*(\[[\s\S]*?\])\s*;?/);
+            if (match) {
+              parsedSongs = JSON.parse(match[1]);
+            } else {
+              // Fallback: search for first [ and last ]
+              const start = text.indexOf('[');
+              const end = text.lastIndexOf(']');
+              if (start !== -1 && end !== -1) {
+                parsedSongs = JSON.parse(text.substring(start, end + 1));
+              } else {
+                throw new Error("Could not find window.defaultSongs assignment in JS file.");
+              }
+            }
+          } else {
+            // JSON file
+            parsedSongs = JSON.parse(text);
+          }
+
+          if (!Array.isArray(parsedSongs)) {
+            throw new Error("Parsed content is not an array of songs.");
+          }
+          if (parsedSongs.length > 0 && (!parsedSongs[0].id || !parsedSongs[0].title)) {
+            throw new Error("Invalid song format. Missing 'id' or 'title' fields.");
+          }
+
+          // Calculate Change Log
+          const currentMap = new Map(state.songs.map(s => [s.id, s]));
+          const backupMap = new Map(parsedSongs.map(s => [s.id, s]));
+
+          const addedSongs = [];
+          const modifiedSongs = [];
+          const deletedSongs = [];
+
+          for (const bSong of parsedSongs) {
+            const cSong = currentMap.get(bSong.id);
+            if (!cSong) {
+              addedSongs.push(bSong);
+            } else {
+              const isDiff = cSong.title !== bSong.title ||
+                             cSong.artist !== bSong.artist ||
+                             cSong.key !== bSong.key ||
+                             cSong.isRTL !== bSong.isRTL ||
+                             cSong.rawText !== bSong.rawText;
+              if (isDiff) {
+                modifiedSongs.push({ current: cSong, backup: bSong });
+              }
+            }
+          }
+
+          for (const cSong of state.songs) {
+            if (!backupMap.has(cSong.id)) {
+              deletedSongs.push(cSong);
+            }
+          }
+
+          // Update summary counts
+          el.restoreFilename.textContent = file.name;
+          el.restoreAddedCount.textContent = addedSongs.length;
+          el.restoreModifiedCount.textContent = modifiedSongs.length;
+          el.restoreDeletedCount.textContent = deletedSongs.length;
+
+          // Render details list
+          let html = '';
+          if (addedSongs.length === 0 && modifiedSongs.length === 0 && deletedSongs.length === 0) {
+            html = `<div style="text-align: center; padding: 1.5rem; color: var(--text-secondary); font-size: 0.9rem;">
+                      No changes detected. The selected backup is identical to your current database.
+                    </div>`;
+          } else {
+            if (addedSongs.length > 0) {
+              html += `<div>
+                <h4 style="color: #22c55e; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 0.4rem; font-weight: 700;">Songs to Add (${addedSongs.length})</h4>
+                <ul style="list-style: none; padding-left: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; max-height: 120px; overflow-y: auto;">
+                  ${addedSongs.map(s => `
+                    <li style="color: var(--text-primary); margin-bottom: 0.15rem; display: flex; align-items: center; gap: 0.5rem;">
+                      <input type="checkbox" class="restore-add-checkbox" data-id="${s.id}" checked style="cursor: pointer; width: 14px; height: 14px;">
+                      <span class="restore-item-text"><strong>+ ${escapeHTML(s.title)}</strong> <span style="color: var(--text-secondary); font-size: 0.8rem;">by ${escapeHTML(s.artist || 'Unknown')}</span></span>
+                    </li>`).join('')}
+                </ul>
+              </div>`;
+            }
+            if (modifiedSongs.length > 0) {
+              html += `<div style="margin-top: 0.8rem;">
+                <h4 style="color: #eab308; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 0.4rem; font-weight: 700;">Songs to Update (${modifiedSongs.length})</h4>
+                <ul style="list-style: none; padding-left: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; max-height: 120px; overflow-y: auto;">
+                  ${modifiedSongs.map(m => `
+                    <li style="color: var(--text-primary); margin-bottom: 0.15rem; display: flex; align-items: center; gap: 0.5rem;">
+                      <input type="checkbox" class="restore-modify-checkbox" data-id="${m.backup.id}" checked style="cursor: pointer; width: 14px; height: 14px;">
+                      <span class="restore-item-text">
+                        <strong>~ ${escapeHTML(m.backup.title)}</strong> 
+                        <span style="color: var(--text-secondary); font-size: 0.8rem;">
+                          (Key: ${escapeHTML(m.current.key || 'None')} → ${escapeHTML(m.backup.key || 'None')})
+                        </span>
+                      </span>
+                    </li>
+                  `).join('')}
+                </ul>
+              </div>`;
+            }
+            if (deletedSongs.length > 0) {
+              html += `<div style="margin-top: 0.8rem;">
+                <h4 style="color: #ef4444; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 0.4rem; font-weight: 700;">Songs to Delete (${deletedSongs.length})</h4>
+                <ul style="list-style: none; padding-left: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; max-height: 120px; overflow-y: auto;">
+                  ${deletedSongs.map(s => `
+                    <li style="color: var(--text-primary); margin-bottom: 0.15rem; display: flex; align-items: center; gap: 0.5rem;">
+                      <input type="checkbox" class="restore-delete-checkbox" data-id="${s.id}" checked style="cursor: pointer; width: 14px; height: 14px;">
+                      <span class="restore-item-text" style="text-decoration: line-through;"><strong>- ${escapeHTML(s.title)}</strong> <span style="color: var(--text-secondary); font-size: 0.8rem;">by ${escapeHTML(s.artist || 'Unknown')}</span></span>
+                    </li>`).join('')}
+                </ul>
+              </div>`;
+            }
+          }
+          el.restoreChangelogDetails.innerHTML = html;
+
+          // Save pending state and open modal
+          state.restorePendingSongs = parsedSongs;
+          el.restoreConfirmModal.classList.add('active');
+        } catch (err) {
+          console.error("Error parsing backup file:", err);
+          showToast("Failed to parse file: " + err.message);
+          el.restoreFileInput.value = '';
+        }
+      };
+
+      reader.onerror = () => {
+        showToast("Error reading file.");
+        el.restoreFileInput.value = '';
+      };
+
+      reader.readAsText(file);
+    });
+  }
+
+  // Handle modal closing
+  const closeRestoreModal = () => {
+    if (el.restoreConfirmModal) {
+      el.restoreConfirmModal.classList.remove('active');
+    }
+    if (el.restoreFileInput) {
+      el.restoreFileInput.value = '';
+    }
+    state.restorePendingSongs = null;
+  };
+
+  if (el.closeRestoreModalBtn) {
+    el.closeRestoreModalBtn.addEventListener('click', closeRestoreModal);
+  }
+  if (el.cancelRestoreModalBtn) {
+    el.cancelRestoreModalBtn.addEventListener('click', closeRestoreModal);
+  }
+
+  // Handle checkbox change in restore changelog details (dynamic styling & count update)
+  if (el.restoreChangelogDetails) {
+    el.restoreChangelogDetails.addEventListener('change', (e) => {
+      if (e.target.classList.contains('restore-add-checkbox') ||
+          e.target.classList.contains('restore-modify-checkbox') ||
+          e.target.classList.contains('restore-delete-checkbox')) {
+        
+        // Recalculate checked counts
+        const addedCount = document.querySelectorAll('.restore-add-checkbox:checked').length;
+        const modifiedCount = document.querySelectorAll('.restore-modify-checkbox:checked').length;
+        const deletedCount = document.querySelectorAll('.restore-delete-checkbox:checked').length;
+
+        if (el.restoreAddedCount) el.restoreAddedCount.textContent = addedCount;
+        if (el.restoreModifiedCount) el.restoreModifiedCount.textContent = modifiedCount;
+        if (el.restoreDeletedCount) el.restoreDeletedCount.textContent = deletedCount;
+
+        // Visual feedback styling
+        const textSpan = e.target.closest('li').querySelector('.restore-item-text');
+        if (textSpan) {
+          if (e.target.classList.contains('restore-delete-checkbox')) {
+            textSpan.style.textDecoration = e.target.checked ? 'line-through' : 'none';
+          } else {
+            textSpan.style.opacity = e.target.checked ? '1' : '0.5';
+          }
+        }
+      }
+    });
+  }
+
+  // Handle Confirm Restore click
+  if (el.confirmRestoreBtn) {
+    el.confirmRestoreBtn.addEventListener('click', async () => {
+      if (!state.restorePendingSongs) {
+        showToast("No pending restore database found.");
+        return;
+      }
+
+      // Calculate final songs list to send to server based on checked boxes!
+      const currentMap = new Map(state.songs.map(s => [s.id, s]));
+      const backupMap = new Map(state.restorePendingSongs.map(s => [s.id, s]));
+      const songsToRestore = [];
+
+      for (const bSong of state.restorePendingSongs) {
+        const cSong = currentMap.get(bSong.id);
+        if (!cSong) {
+          // Added song
+          const cb = document.querySelector(`.restore-add-checkbox[data-id="${bSong.id}"]`);
+          if (!cb || cb.checked) {
+            songsToRestore.push(bSong);
+          }
+        } else {
+          // Modified or Unchanged
+          const isModified = cSong.title !== bSong.title ||
+                             cSong.artist !== bSong.artist ||
+                             cSong.key !== bSong.key ||
+                             cSong.isRTL !== bSong.isRTL ||
+                             cSong.rawText !== bSong.rawText;
+          if (isModified) {
+            const cb = document.querySelector(`.restore-modify-checkbox[data-id="${bSong.id}"]`);
+            if (!cb || cb.checked) {
+              songsToRestore.push(bSong);
+            } else {
+              songsToRestore.push(cSong);
+            }
+          } else {
+            songsToRestore.push(bSong);
+          }
+        }
+      }
+
+      for (const cSong of state.songs) {
+        if (!backupMap.has(cSong.id)) {
+          // Deleted song
+          const cb = document.querySelector(`.restore-delete-checkbox[data-id="${cSong.id}"]`);
+          // If deleted song checkbox is UNchecked, it means "do NOT delete (Keep)" -> include current version
+          if (cb && !cb.checked) {
+            songsToRestore.push(cSong);
+          }
+        }
+      }
+
+      if (songsToRestore.length === 0) {
+        showToast("Cannot restore an empty database. Please select at least one song.");
+        return;
+      }
+
+      try {
+        showToast("Restoring selected database changes...");
+        const response = await fetch('/api/restore-backup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ songs: songsToRestore })
+        });
+
+        if (response.ok) {
+          try {
+            window.localStorage.removeItem('songs_db_version');
+            if (db) {
+              const transaction = db.transaction(['songs'], 'readwrite');
+              transaction.objectStore('songs').clear();
+              console.log("Local IndexedDB songs store cleared for sync.");
+            }
+          } catch (e) {
+            console.error("Failed to clear local DB cache:", e);
+          }
+
+          showToast("Database restored successfully! Reloading...");
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        } else {
+          const errText = await response.text();
+          console.error("Restore failed:", errText);
+          showToast("Failed to restore backup: " + errText);
+        }
+      } catch (err) {
+        console.error("Network or server error during restore:", err);
+        showToast("Error connecting to server. Make sure dev server is running.");
+      }
+    });
+  }
+
   // Chord Hover / Tap Tooltip events
   document.addEventListener('mouseover', handleChordTooltipOpen);
   document.addEventListener('mouseout', handleChordTooltipClose);
@@ -797,6 +1245,7 @@ function bindEvents(db) {
         el.formTitle.value = result.title;
         el.formText.value = result.text;
         el.formRtl.checked = result.isRTL;
+        updateFormTextDirection();
 
         el.importStatus.textContent = "Imported successfully!";
         showToast("Word document converted.");
@@ -1512,8 +1961,26 @@ function renderActiveSong() {
     return;
   }
 
-  const song = state.songs.find(s => s.id === state.currentSongId);
+  let song = state.songs.find(s => s.id === state.currentSongId);
   if (!song) return;
+
+  const activeSetlist = state.setlists.find(s => s.id === state.activeSetlistId);
+  
+  // Merge setlist overrides if viewing within active setlist context
+  if (activeSetlist && state.activeSetlistSongIndex !== null) {
+    const setlistSongItem = activeSetlist.songs[state.activeSetlistSongIndex];
+    if (setlistSongItem) {
+      song = {
+        ...song,
+        title: setlistSongItem.title !== undefined ? setlistSongItem.title : song.title,
+        artist: setlistSongItem.artist !== undefined ? setlistSongItem.artist : song.artist,
+        key: setlistSongItem.key !== undefined ? setlistSongItem.key : song.key,
+        isRTL: setlistSongItem.isRTL !== undefined ? setlistSongItem.isRTL : song.isRTL,
+        rawText: setlistSongItem.rawText !== undefined ? setlistSongItem.rawText : song.rawText,
+        remarks: setlistSongItem.remarks || ''
+      };
+    }
+  }
 
   // Load BPM for current song
   if (song.bpm) {
@@ -1535,7 +2002,6 @@ function renderActiveSong() {
   container.className = `song-container ${song.isRTL ? 'rtl' : ''}`;
 
   // Floating Setlist Gig Navigation Bar
-  const activeSetlist = state.setlists.find(s => s.id === state.activeSetlistId);
   if (activeSetlist && state.activeSetlistSongIndex !== null) {
     const navBar = document.createElement('div');
     navBar.className = 'setlist-gig-nav';
@@ -1580,6 +2046,11 @@ function renderActiveSong() {
           <button class="btn" id="edit-active-btn" style="flex: none; font-size: 0.8rem; padding: 4px 10px;">Edit</button>
         </div>
       </div>
+      ${song.remarks ? `
+        <div class="song-remarks-box" style="margin-top: 1rem; padding: 0.6rem 1rem; background-color: var(--accent-light); border-left: 4px solid var(--accent-color); border-radius: 4px; font-size: 0.9rem; font-style: italic; color: var(--text-primary); text-align: left;">
+          <strong>Note:</strong> ${escapeHTML(song.remarks)}
+        </div>
+      ` : ''}
     </div>
   `;
   const headerDiv = document.createElement('div');
@@ -1617,6 +2088,7 @@ function renderActiveSong() {
 
         if (line.type === 'chord-lyric') {
           lineDiv.className = 'chord-lyric-line';
+          let formattingState = { bold: false, highlight: false };
           line.segments.forEach(seg => {
             const segSpan = document.createElement('span');
             segSpan.className = 'chord-segment';
@@ -1658,7 +2130,7 @@ function renderActiveSong() {
 
             const lyricSpan = document.createElement('span');
             lyricSpan.className = 'lyric-text';
-            lyricSpan.innerHTML = escapeHTML(seg.text);
+            lyricSpan.innerHTML = formatSegmentText(seg.text, formattingState);
             segSpan.appendChild(lyricSpan);
 
             lineDiv.appendChild(segSpan);
@@ -1695,7 +2167,7 @@ function renderActiveSong() {
         } else {
           // Plain lyrics
           lineDiv.className = 'lyric-only-line';
-          lineDiv.textContent = line.text;
+          lineDiv.innerHTML = formatLyricText(line.text);
         }
 
         p.appendChild(lineDiv);
@@ -1912,20 +2384,29 @@ function openSongModal(song = null) {
   el.formKey.value = '';
   el.formRtl.checked = false;
   el.formText.value = '';
+  if (el.formRemarks) el.formRemarks.value = '';
 
   if (el.formImportFile) el.formImportFile.value = '';
   if (el.importStatus) el.importStatus.textContent = '';
 
+  const isSetlistEdit = !!(state.activeSetlistId && state.activeSetlistSongIndex !== null);
+  if (el.remarksGroup) {
+    el.remarksGroup.style.display = isSetlistEdit ? 'block' : 'none';
+  }
+
   if (song) {
     // Editing mode
-    el.modalTitle.textContent = "Edit Song";
+    el.modalTitle.textContent = isSetlistEdit ? "Edit Song in Setlist" : "Edit Song";
     el.editSongId.value = song.id;
     el.formTitle.value = song.title;
     el.formArtist.value = song.artist === 'Unknown Artist' ? '' : song.artist;
     el.formKey.value = song.key || '';
     el.formRtl.checked = song.isRTL;
     el.formText.value = song.rawText;
-    el.deleteSongBtn.style.display = 'block';
+    if (el.formRemarks) {
+      el.formRemarks.value = song.remarks || '';
+    }
+    el.deleteSongBtn.style.display = isSetlistEdit ? 'none' : 'block';
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'none';
   } else {
     // New song mode
@@ -1934,12 +2415,20 @@ function openSongModal(song = null) {
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'block';
   }
 
+  updateFormTextDirection();
+
   el.songModal.classList.add('active');
   el.formTitle.focus();
 }
 
 function closeSongModal() {
   el.songModal.classList.remove('active');
+}
+
+function updateFormTextDirection() {
+  if (el.formRtl && el.formText) {
+    el.formText.classList.toggle('rtl', el.formRtl.checked);
+  }
 }
 
 // ==========================================
@@ -2139,21 +2628,41 @@ function renderSetlistEditor() {
     const song = state.songs.find(s => s.id === item.songId);
     if (!song) return; // song might have been deleted from global songs
 
+    // Merge overrides
+    const mergedSong = {
+      ...song,
+      title: item.title !== undefined ? item.title : song.title,
+      artist: item.artist !== undefined ? item.artist : song.artist,
+      key: item.key !== undefined ? item.key : song.key,
+      isRTL: item.isRTL !== undefined ? item.isRTL : song.isRTL,
+      remarks: item.remarks || ''
+    };
+
     const row = document.createElement('div');
     row.className = 'setlist-song-row';
 
     let displayKey = 'Orig';
-    if (song.key) {
-      const transposed = window.Transposer.transposeChord(song.key, item.transposeOffset || 0, state.preferFlats);
+    if (mergedSong.key) {
+      const transposed = window.Transposer.transposeChord(mergedSong.key, item.transposeOffset || 0, state.preferFlats);
       displayKey = cleanChordNameForDisplay(transposed);
     }
 
-    const isRtlStyle = song.isRTL ? 'dir="rtl" style="text-align: right;"' : '';
+    const isRtlStyle = mergedSong.isRTL ? 'dir="rtl" style="text-align: right;"' : '';
+
+    const remarksBadge = mergedSong.remarks ? `
+      <div style="font-size: 0.7rem; color: var(--accent-color); font-style: italic; margin-top: 0.15rem; display: flex; align-items: center; gap: 0.2rem;">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span>${escapeHTML(mergedSong.remarks.length > 25 ? mergedSong.remarks.substring(0, 25) + '...' : mergedSong.remarks)}</span>
+      </div>
+    ` : '';
 
     row.innerHTML = `
       <div class="setlist-song-info" ${isRtlStyle}>
-        <div class="setlist-song-title">${escapeHTML(song.title)}</div>
-        <div class="setlist-song-artist">${escapeHTML(song.artist)}</div>
+        <div class="setlist-song-title">${escapeHTML(mergedSong.title)}</div>
+        <div class="setlist-song-artist">${escapeHTML(mergedSong.artist)}</div>
+        ${remarksBadge}
       </div>
       <div class="setlist-song-controls">
         <span class="setlist-song-key-badge">${displayKey}</span>

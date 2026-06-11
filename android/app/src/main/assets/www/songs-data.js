@@ -1,4 +1,4 @@
-window.defaultSongsVersion = '2026-05-30T20:05:41.475584';
+window.defaultSongsVersion = '2026-06-11T21:44:06.635748';
 window.defaultSongs = [
   {
     "title": "Against All Odds",
@@ -4135,5 +4135,13 @@ window.defaultSongs = [
     "isRTL": true,
     "rawText": "// Gm / Dm / Eb / F4 F // x4\n\n\nDm                 Gm\nתתארו לכם עולם יפה\nF  F4                        Eb\nפחות עצוב ממה שהוא ככה\nF   F4             Eb      Dm               Gm\nואנחנו שם הולכים עם שמש בכיסים\nF   F4                     Eb    Dm         Gm\nומעל גגות הכוכבים והזמן עובר בלי פחד\nF     F4                                Eb\nואני הולך לפגוש אותה בגן העדן\n\n\n  Dm                Gm\nתתארו לכם קצת אושר\nF          F4              Eb\nכי הוא כל כך כל כך נדיר כאן\n  Dm             Gm\nעיר מגניבה בתוך החושך\nF    F4            Eb\nושנינו בשמיכה\n    Dm                Gm\nוהיא מלטפת אותי ואומרת לי\nF   F4              Eb\nמחר יקרה מה שרצית\nBb  Bb4  Bb     F  F4                               Eb\nוהיא מלאת השתקפויות של עצב  ושמחה\n\n\n Eb\nתתארו לכם באמצע יום יפה\n        Bb\nשמיים מעליכם  האהבה איתכם\n                       Bb\nכן ככה זה קרה, לפתע היא אמרה\n       D                           F\nאני עוד זוכר אותה, כמו בסערה\n Gm                                           Eb\nתתארו לכם אותי נופל לתוך זרועותיה\n\n\n// Gm / Dm / Eb / F4 F // x2\n\n\n Dm                   Gm\nתתארו לכם עולם פשוט\nF   F4                  Eb\nחדר ללילה, בית בגשם\n Dm                Gm\nרוחות עצים מלאים בתות\nF    F4          Eb\nושנינו שיכורים\n Dm          Gm\nאם נפרד אני אמות\nF    F4          Eb\nהיא לוחשת וגועשת\nGm    F   F4                                                Eb\nתתארו לכם עוד הזדמנות לחזור פתאום לנעורים\n\n\n// Gm / Dm / Eb / F4 F //\n\n\n Dm                Gm\nתתארו לכם את החיים\nF    F4         Eb\nזזים אחורה וקדימה\nDm               Gm\nמה שחסר שוב מיתמלא\nF   F4                 Eb\nמה שהיה פתאום ישנו\n Dm             Gm\nואני מביט לתוך עיניה\nF     F4             Eb\nונגנב בכוח פנימה\nBb  Bb4  Bb           F          F4                               Eb\nתתארו לכם אותנו מגשימים את כל החלומות\n\n\n Eb\nתתארו לכם באמצע יום יפה\n        Bb\nשמיים מעליכם  האהבה איתכם\n                       Bb\nכן ככה זה קרה, לפתע היא אמרה\n       D                           F\nאני עוד זוכר אותה, כמו בסערה\n Gm                                           Eb\nתתארו לכם אותי נופל לתוך זרועותיה\n\n\n// Gm / Dm / Eb / F4 F // x2\n\n\nDm                  Gm\nתתארו לכם עולם יפה\nF  F4                        Eb\nפחות עצוב ממה שהוא ככה\nDm             Gm\nואנחנו שם הולכים\n Gm    F F4  Eb\nעם שמש     בכיסים\n\n\n// Gm / Dm / Eb / F4 F //",
     "id": "song_518"
+  },
+  {
+    "id": "custom_1781203446589",
+    "title": "Alignment Test",
+    "artist": "Test Artist",
+    "key": "Am",
+    "isRTL": false,
+    "rawText": "Am             C\nThis is **bolded word** and this is ==highlighted word==."
   }
 ];
