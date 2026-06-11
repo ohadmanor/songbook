@@ -37,6 +37,8 @@ venv/
 artist_cache.json
 scripts/artist_cache.json
 manual_edits.json
+songbook-release.apk
+songbook.html
 scripts/manual_edits.json
 outputs/songbook-release.apk
 outputs/songbook.apk
