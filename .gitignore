@@ -24,6 +24,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.bck
 .venv/
 env/
 venv/
@@ -37,4 +38,5 @@ artist_cache.json
 scripts/artist_cache.json
 manual_edits.json
 scripts/manual_edits.json
+outputs/
 *.log
