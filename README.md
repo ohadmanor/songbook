@@ -14,7 +14,11 @@ It is distributed as both a **standalone portable HTML sheet** (for any browser 
 * **Auto-Scroll**: Hands-free scrolling with a customizable speed slider to keep page movement in sync with your playing speed.
 * **Theme Customization**: Tailored, high-quality themes (Light, Dark, Sepia, and OLED Black) to ensure optimal legibility under any lighting conditions.
 * **Setlist Management**: Create custom setlists, reorder songs, adjust individual song transposition settings per setlist, and import/export setlists as JSON.
-* **Distraction-Free Maximize Mode (New)**:
+* **Database Backup, Restore & Revert**:
+  * Export complete database backup as a `.json` file.
+  * Restore database from backup JSON/JS files using the **Restore Database Manager** modal (accessed from the sidebar footer), which displays a detailed change summary (additions, modifications, and deletions).
+  * Revert to the database's previous state prior to the last restore operation using the yellow **Undo Last Restore** button. This safety feature works both online (via server backups) and offline (via browser IndexedDB backups).
+* **Distraction-Free Fullscreen Mode**:
   * Click the **Maximize** button in the toolbar to enter fullscreen mode.
   * Hides both the sidebar and the toolbar, expanding the song sheet area to take up 100% of the screen.
   * Displays a floating glassmorphic Restore button in the top-right corner to exit fullscreen.
@@ -26,8 +30,8 @@ It is distributed as both a **standalone portable HTML sheet** (for any browser 
 
 ```mermaid
 graph TD
-    A[web/ Front-end] -->|IndexedDB| B(Local Browser Storage)
-    A -->|API: /api/save-song| C[scripts/server.py]
+    A[web/ Front-end] -->|IndexedDB: songs & setlists & pre_restore| B(Local Browser Storage)
+    A -->|API endpoints| C[scripts/server.py]
     C -->|Updates| D[web/songs-data.js]
     C -->|Bundles| E[outputs/songbook.html]
     A -->|Sync script| F[android/app/src/main/assets/www]
@@ -35,8 +39,8 @@ graph TD
 
 ### 1. Web Front-end (`web/`)
 A pure, framework-less frontend built with standard HTML5, CSS3, and Vanilla JavaScript. 
-* **IndexedDB Store**: Manages custom user-added songs and setlist data locally within the browser.
-* **Static Fallback**: Reads default songs from [songs-data.js](file:///c:/Develop/Github/songbook/web/songs-data.js) (automatically updated by the build pipeline).
+* **IndexedDB Store**: Manages custom user-added songs, setlists, and a `pre_restore` safety backup store.
+* **Static Fallback**: Reads default songs from [songs-data.js](file:///c:/dev/songbook/web/songs-data.js) (automatically updated by the build pipeline).
 
 ### 2. Standalone HTML (`outputs/songbook.html`)
 A single, highly portable, standalone application generated in the `outputs/` directory of the workspace. All JS libraries, stylesheets, and song databases are fully inlined.
@@ -48,7 +52,7 @@ A native Android project configured to wrap the web assets locally in a WebView.
 
 ## 📋 Dev Scripts & Pipeline
 
-All utility scripts are written in Python and located in the [scripts/](file:///c:/Develop/Github/songbook/scripts) directory.
+All utility scripts are written in Python and located in the [scripts/](file:///c:/dev/songbook/scripts) directory.
 
 ### 1. Development & Sync Server
 Run the local dev server to host the web app and capture song edits made directly in the UI to save them back to your local disk:
@@ -57,7 +61,12 @@ python scripts/server.py
 ```
 * **Default Port**: `8080` (can be overridden, e.g. `python scripts/server.py 9000`).
 * Serves the front-end at `http://localhost:8080`.
-* Listens to the `/api/save-song` endpoint and automatically writes edits to `scripts/manual_edits.json`, updates `web/songs-data.js`, and regenerates the standalone `outputs/songbook.html`.
+* **Sync API Endpoints**:
+  - `POST /api/save-song`: Automatically writes edits to `scripts/manual_edits.json`, updates `web/songs-data.js`, and rebuilds assets.
+  - `POST /api/delete-song`: Synchronizes song deletions across edits and main files on disk.
+  - `POST /api/restore-backup`: Restores a user-uploaded database backup, performs a safety backup of disk configurations, aligns `manual_edits.json` automatically, and triggers a clean rebuild.
+  - `GET /api/check-undo-available`: Checks if a pre-restore backup exists on disk.
+  - `POST /api/undo-restore`: Reverts `songs-data.js` and `manual_edits.json` back to their exact pre-restoration states.
 
 ### 2. Standalone HTML Bundler
 Inlines all frontend assets (HTML, CSS, JS, external libraries, and song data) into a single standalone file in `outputs/`:

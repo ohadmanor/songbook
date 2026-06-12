@@ -290,37 +290,63 @@
   <div class="modal-overlay" id="restore-confirm-modal">
     <div class="modal-content" style="max-width: 600px;">
       <div class="modal-header">
-        <h2>Restore Database Change Log</h2>
+        <h2>Restore Database Manager</h2>
         <button class="btn" id="close-restore-modal-btn" style="border: none; padding: 4px 8px; font-size: 1.2rem; cursor: pointer;">×</button>
       </div>
-      <div class="modal-body" style="max-height: 400px; overflow-y: auto; gap: 1rem;">
-        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
-          Selected file: <strong id="restore-filename" style="color: var(--text-primary);">None</strong>
-        </p>
+      <div class="modal-body" style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
         
-        <!-- Summary Stats -->
-        <div style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
-          <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
-            <div style="font-size: 1.2rem; font-weight: bold; color: #22c55e;" id="restore-added-count">0</div>
-            <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Added</div>
-          </div>
-          <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
-            <div style="font-size: 1.2rem; font-weight: bold; color: #eab308;" id="restore-modified-count">0</div>
-            <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Modified</div>
-          </div>
-          <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
-            <div style="font-size: 1.2rem; font-weight: bold; color: #ef4444;" id="restore-deleted-count">0</div>
-            <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Deleted</div>
+        <!-- State 1: Choose File or Revert -->
+        <div id="restore-select-view" style="display: flex; flex-direction: column; gap: 1.2rem; padding: 0.5rem 0;">
+          <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">
+            Select a backup file (<code>.json</code> or <code>.js</code>) to restore your songs database, or revert to the previous state if you recently performed a restore.
+          </p>
+          
+          <button class="btn btn-primary" id="restore-select-file-btn" style="width: 100%; padding: 0.75rem; font-size: 0.95rem;">
+            📁 Select Backup File...
+          </button>
+          
+          <div id="restore-undo-section" style="display: none; border-top: 1px dashed var(--border-color); padding-top: 1.2rem; flex-direction: column; gap: 0.6rem;">
+            <h4 style="margin: 0; font-size: 0.85rem; text-transform: uppercase; color: var(--text-secondary); font-weight: 700;">Revert Last Restore</h4>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">
+              A safety backup was saved automatically before your last restore. You can undo the restore and revert to your previous database.
+            </p>
+            <button class="btn" id="restore-undo-btn" style="width: 100%; padding: 0.75rem; background-color: #eab308; color: black; border-color: #eab308; font-weight: 700;">
+              ↩️ Undo Last Restore
+            </button>
           </div>
         </div>
 
-        <div id="restore-changelog-details" style="display: flex; flex-direction: column; gap: 0.8rem;">
-          <!-- Diff sections will be dynamically populated here -->
+        <!-- State 2: Changelog view (after file selection) -->
+        <div id="restore-changelog-view" style="display: none; flex-direction: column; gap: 1rem;">
+          <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">
+            Selected file: <strong id="restore-filename" style="color: var(--text-primary);">None</strong>
+          </p>
+          
+          <!-- Summary Stats -->
+          <div style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
+            <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
+              <div style="font-size: 1.2rem; font-weight: bold; color: #22c55e;" id="restore-added-count">0</div>
+              <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Added</div>
+            </div>
+            <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
+              <div style="font-size: 1.2rem; font-weight: bold; color: #eab308;" id="restore-modified-count">0</div>
+              <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Modified</div>
+            </div>
+            <div style="flex: 1; padding: 0.6rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color); text-align: center;">
+              <div style="font-size: 1.2rem; font-weight: bold; color: #ef4444;" id="restore-deleted-count">0</div>
+              <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Deleted</div>
+            </div>
+          </div>
+
+          <div id="restore-changelog-details" style="display: flex; flex-direction: column; gap: 0.8rem;">
+            <!-- Diff sections will be populated dynamically -->
+          </div>
         </div>
+
       </div>
       <div class="modal-footer">
         <button class="btn" id="cancel-restore-modal-btn">Cancel</button>
-        <button class="btn btn-primary" id="confirm-restore-btn" style="background-color: #ef4444; border-color: #ef4444;">Restore Selected Changes</button>
+        <button class="btn btn-primary" id="confirm-restore-btn" style="background-color: #ef4444; border-color: #ef4444; display: none;">Restore Selected Changes</button>
       </div>
     </div>
   </div>

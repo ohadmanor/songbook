@@ -162,7 +162,7 @@ let lastScrollTime = 0;
 
 // IndexedDB Helper Functions
 const DB_NAME = 'SongbookDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'songs';
 const SETLIST_STORE_NAME = 'setlists';
 
@@ -180,6 +180,9 @@ function initDB() {
       }
       if (!db.objectStoreNames.contains(SETLIST_STORE_NAME)) {
         db.createObjectStore(SETLIST_STORE_NAME, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('pre_restore')) {
+        db.createObjectStore('pre_restore', { keyPath: 'id' });
       }
     };
   });
@@ -916,9 +919,59 @@ function bindEvents(db) {
     }
   });
 
-  // Restore Backup Button triggers file input
+  // Restore Backup Button triggers modal (State 1) and checks undo availability
   if (el.restoreBackupBtn) {
-    el.restoreBackupBtn.addEventListener('click', () => {
+    el.restoreBackupBtn.addEventListener('click', async () => {
+      if (el.restoreFileInput) el.restoreFileInput.value = '';
+      
+      // Reset view to State 1
+      const selectView = document.getElementById('restore-select-view');
+      const changelogView = document.getElementById('restore-changelog-view');
+      if (selectView) selectView.style.display = 'flex';
+      if (changelogView) changelogView.style.display = 'none';
+      if (el.confirmRestoreBtn) el.confirmRestoreBtn.style.display = 'none';
+      
+      let undoAvailable = false;
+      try {
+        const response = await fetch('/api/check-undo-available');
+        if (response.ok) {
+          const data = await response.json();
+          undoAvailable = !!data.undoAvailable;
+        }
+      } catch (err) {
+        // Local IndexedDB check
+        if (db) {
+          try {
+            const transaction = db.transaction(['pre_restore'], 'readonly');
+            const store = transaction.objectStore('pre_restore');
+            const countReq = store.count();
+            await new Promise((res) => {
+              countReq.onsuccess = () => {
+                undoAvailable = countReq.result > 0;
+                res();
+              };
+              countReq.onerror = () => {
+                undoAvailable = false;
+                res();
+              };
+            });
+          } catch (e) {
+            undoAvailable = false;
+          }
+        }
+      }
+      
+      const undoSection = document.getElementById('restore-undo-section');
+      if (undoSection) undoSection.style.display = undoAvailable ? 'flex' : 'none';
+      
+      el.restoreConfirmModal.classList.add('active');
+    });
+  }
+
+  // Trigger file selection inside the modal
+  const selectFileBtn = document.getElementById('restore-select-file-btn');
+  if (selectFileBtn && el.restoreFileInput) {
+    selectFileBtn.addEventListener('click', () => {
       el.restoreFileInput.click();
     });
   }
@@ -1050,9 +1103,15 @@ function bindEvents(db) {
           }
           el.restoreChangelogDetails.innerHTML = html;
 
-          // Save pending state and open modal
+          // Switch to State 2 (Changelog view)
+          const selectView = document.getElementById('restore-select-view');
+          const changelogView = document.getElementById('restore-changelog-view');
+          if (selectView) selectView.style.display = 'none';
+          if (changelogView) changelogView.style.display = 'flex';
+          if (el.confirmRestoreBtn) el.confirmRestoreBtn.style.display = 'block';
+
+          // Save pending state
           state.restorePendingSongs = parsedSongs;
-          el.restoreConfirmModal.classList.add('active');
         } catch (err) {
           console.error("Error parsing backup file:", err);
           showToast("Failed to parse file: " + err.message);
@@ -1085,6 +1144,83 @@ function bindEvents(db) {
   }
   if (el.cancelRestoreModalBtn) {
     el.cancelRestoreModalBtn.addEventListener('click', closeRestoreModal);
+  }
+
+  // Handle Revert Last Restore click
+  const undoBtn = document.getElementById('restore-undo-btn');
+  if (undoBtn) {
+    undoBtn.addEventListener('click', async () => {
+      if (confirm("Are you sure you want to revert to the previous database? Your current edits will be replaced.")) {
+        closeRestoreModal();
+        showToast("Reverting last restore...");
+        
+        try {
+          const response = await fetch('/api/undo-restore', { method: 'POST' });
+          if (response.ok) {
+            try {
+              window.localStorage.removeItem('songs_db_version');
+              if (db) {
+                const transaction = db.transaction(['songs'], 'readwrite');
+                transaction.objectStore('songs').clear();
+              }
+            } catch (e) {
+              console.error(e);
+            }
+            showToast("Database reverted successfully! Reloading...");
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
+            return;
+          }
+        } catch (err) {
+          console.log("Server undo unavailable. Attempting local IndexedDB undo.", err);
+        }
+        
+        // Local IndexedDB undo fallback
+        if (db) {
+          try {
+            const readTransaction = db.transaction(['pre_restore'], 'readonly');
+            const preStore = readTransaction.objectStore('pre_restore');
+            const songsToRevert = await new Promise((res, rej) => {
+              const req = preStore.getAll();
+              req.onsuccess = () => res(req.result);
+              req.onerror = () => rej(req.error);
+            });
+            
+            if (songsToRevert && songsToRevert.length > 0) {
+              const writeTransaction = db.transaction(['songs', 'pre_restore'], 'readwrite');
+              const songsStore = writeTransaction.objectStore('songs');
+              const preStoreWrite = writeTransaction.objectStore('pre_restore');
+              
+              songsStore.clear();
+              songsToRevert.forEach(s => songsStore.put(s));
+              preStoreWrite.clear();
+              
+              writeTransaction.oncomplete = () => {
+                const currentVersion = window.defaultSongsVersion || 'unknown';
+                localStorage.setItem('songs_db_version', currentVersion);
+                showToast("Database reverted locally! Reloading...");
+                setTimeout(() => {
+                  window.location.reload();
+                }, 1500);
+              };
+              
+              writeTransaction.onerror = (e) => {
+                console.error("Local undo transaction failed:", e);
+                showToast("Revert failed: database error.");
+              };
+            } else {
+              showToast("No local undo backup found.");
+            }
+          } catch (dbErr) {
+            console.error("Failed to execute local undo restore:", dbErr);
+            showToast("Revert failed: " + dbErr.message);
+          }
+        } else {
+          showToast("Revert failed: database unavailable.");
+        }
+      }
+    });
   }
 
   // Handle checkbox change in restore changelog details (dynamic styling & count update)
@@ -1182,29 +1318,89 @@ function bindEvents(db) {
         });
 
         if (response.ok) {
+          let newVersion = 'unknown';
           try {
-            window.localStorage.removeItem('songs_db_version');
-            if (db) {
-              const transaction = db.transaction(['songs'], 'readwrite');
-              transaction.objectStore('songs').clear();
-              console.log("Local IndexedDB songs store cleared for sync.");
+            const data = await response.json();
+            if (data && data.version) {
+              newVersion = data.version;
             }
-          } catch (e) {
-            console.error("Failed to clear local DB cache:", e);
+          } catch (jsonErr) {
+            console.warn("Failed to parse server version from restore response:", jsonErr);
           }
 
-          showToast("Database restored successfully! Reloading...");
-          setTimeout(() => {
-            window.location.reload();
-          }, 1500);
+          if (db) {
+            try {
+              const transaction = db.transaction(['songs'], 'readwrite');
+              const store = transaction.objectStore('songs');
+              store.clear();
+              songsToRestore.forEach(song => store.put(song));
+              
+              transaction.oncomplete = () => {
+                localStorage.setItem('songs_db_version', newVersion);
+                showToast("Database restored successfully! Reloading...");
+                setTimeout(() => {
+                  window.location.reload();
+                }, 1500);
+              };
+              
+              transaction.onerror = (e) => {
+                console.error("Failed to write restored songs to IndexedDB:", e);
+                localStorage.setItem('songs_db_version', newVersion);
+                window.location.reload();
+              };
+            } catch (dbErr) {
+              console.error("Error writing restored songs to IndexedDB:", dbErr);
+              localStorage.setItem('songs_db_version', newVersion);
+              window.location.reload();
+            }
+          } else {
+            localStorage.setItem('songs_db_version', newVersion);
+            showToast("Database restored successfully! Reloading...");
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
+          }
         } else {
           const errText = await response.text();
           console.error("Restore failed:", errText);
           showToast("Failed to restore backup: " + errText);
         }
       } catch (err) {
-        console.error("Network or server error during restore:", err);
-        showToast("Error connecting to server. Make sure dev server is running.");
+        console.warn("Network or server error during restore, attempting local browser restore fallback:", err);
+        if (db) {
+          try {
+            const transaction = db.transaction(['songs', 'pre_restore'], 'readwrite');
+            const store = transaction.objectStore('songs');
+            const preStore = transaction.objectStore('pre_restore');
+            
+            // Backup current songs to pre_restore
+            preStore.clear();
+            state.songs.forEach(song => preStore.put(song));
+            
+            // Clear and restore
+            store.clear();
+            songsToRestore.forEach(song => store.put(song));
+            
+            transaction.oncomplete = () => {
+              const currentVersion = window.defaultSongsVersion || 'unknown';
+              localStorage.setItem('songs_db_version', currentVersion);
+              showToast("Database restored locally in browser successfully! Reloading...");
+              setTimeout(() => {
+                window.location.reload();
+              }, 1500);
+            };
+
+            transaction.onerror = (e) => {
+              console.error("Local IndexedDB restore failed:", e);
+              showToast("Failed to restore locally: database error.");
+            };
+          } catch (dbErr) {
+            console.error("Failed to execute local DB restore:", dbErr);
+            showToast("Failed to restore locally: " + dbErr.message);
+          }
+        } else {
+          showToast("Error connecting to server and local database is unavailable.");
+        }
       }
     });
   }
