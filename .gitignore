@@ -40,7 +40,7 @@ manual_edits.json
 songbook-release.apk
 songbook.html
 scripts/manual_edits.json
-outputs/songbook-release.apk
-outputs/songbook.apk
-outputs/songbook.html
 *.log
+
+# Built outputs
+outputs/

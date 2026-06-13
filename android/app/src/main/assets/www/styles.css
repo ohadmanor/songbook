@@ -756,29 +756,29 @@ body {
 
 .song-image {
   display: inline-block;
-  max-width: 15%;
+  max-width: 100%;
   height: auto;
   border-radius: 12px;
   box-shadow: var(--shadow);
   border: 1px solid var(--border-color);
   transition: filter 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease, max-width 0.3s ease;
   background-color: #ffffff; /* Preserves visual clarity if some regions are transparent */
-  cursor: zoom-in;
+  cursor: zoom-out;
 }
 
 .song-image:hover {
-  transform: scale(1.015);
+  transform: scale(1.01);
   box-shadow: var(--shadow-lg);
 }
 
 .song-image.expanded {
-  max-width: 100%;
-  cursor: zoom-out;
+  max-width: 15%;
+  cursor: zoom-in;
 }
 
 @media (max-width: 768px) {
   .song-image {
-    max-width: 30%;
+    max-width: 100%;
   }
 }
 
@@ -807,6 +807,18 @@ body {
   z-index: 1000;
   margin-top: 0.3rem;
   display: none;
+  animation: dropdownFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .search-dropdown-item {
@@ -823,7 +835,8 @@ body {
   border-bottom: none;
 }
 
-.search-dropdown-item:hover {
+.search-dropdown-item:hover,
+.search-dropdown-item.highlighted {
   background-color: var(--accent-light);
 }
 
@@ -1051,3 +1064,62 @@ body {
 .restore-btn svg {
   display: block;
 }
+
+/* Editor Toolbar Uniform Buttons */
+.editor-toolbar .btn {
+  padding: 6px;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+/* Green Highlight text formatting in song sheet */
+.song-highlight-green {
+  background-color: #bbf7d0; /* Soft bright green in light theme */
+  color: #1e293b; /* Dark text for contrast */
+  padding: 0 4px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* For dark / OLED / sepia themes, we override green highlight colors */
+[data-theme="dark"] .song-highlight-green,
+[data-theme="oled"] .song-highlight-green {
+  background-color: #15803d; /* Soft dark/forest green in dark mode */
+  color: #ffffff;
+}
+
+[data-theme="sepia"] .song-highlight-green {
+  background-color: #166534; /* Soft dark forest green in sepia */
+  color: #ffffff;
+}
+
+/* Floating Fullscreen Controls (Minimized View) */
+.fullscreen-controls {
+  position: fixed;
+  top: 15px;
+  right: 15px;
+  background-color: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  transition: opacity 0.2s ease;
+  opacity: 0.85;
+}
+
+.fullscreen-controls:hover {
+  opacity: 1;
+}
+
+

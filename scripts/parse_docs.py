@@ -269,10 +269,25 @@ def main():
     # Get all .docx files
     files = [f for f in os.listdir(import_dir) if f.lower().endswith('.docx') and not f.startswith('~$')]
     
-    if not files:
-        print("\n--> No .docx files found in the 'import_songs' directory!")
-        print(f"--> Please copy your 500 .docx files into: {import_dir}")
-        print("--> Then run this script again to parse them.")
+    # Load base songs from songs_db/songbook_backup.json (source of truth)
+    songs_db_dir = os.path.join(project_root, 'songs_db')
+    backup_file = os.path.join(songs_db_dir, 'songbook_backup.json')
+    
+    songs = []
+    has_backup = False
+    if os.path.exists(backup_file):
+        try:
+            with open(backup_file, 'r', encoding='utf-8') as f:
+                songs = json.load(f)
+            print(f"Loaded {len(songs)} base songs from source of truth backup at: {backup_file}")
+            has_backup = True
+        except Exception as e:
+            print(f"Error loading base backup file {backup_file}: {e}")
+
+    # Fallback to dummy songs if no backup file is found and there are no files to parse
+    if not files and not has_backup:
+        print("\n--> No .docx files found in the 'import_songs' directory and no base backup found!")
+        print(f"--> Please copy your .docx files into: {import_dir}")
         
         # Write a dummy song so the web application loads successfully on first boot
         dummy_songs = [
@@ -326,188 +341,218 @@ def main():
         except Exception as e:
             print(f"Error loading manual edits: {e}")
 
-    print(f"Found {len(files)} files to process.")
-    songs = []
-    
-    web_media_dir = os.path.join(web_dir, 'media')
-    os.makedirs(web_media_dir, exist_ok=True)
-    
-    for idx, filename in enumerate(files):
-        file_path = os.path.join(import_dir, filename)
+    # Process docx files if present
+    if files:
+        print(f"Found {len(files)} files to process in {import_dir}.")
+        web_media_dir = os.path.join(web_dir, 'media')
+        os.makedirs(web_media_dir, exist_ok=True)
         
-        song_id = f"song_{idx+1}"
+        # Find the next available numeric ID to avoid clashing with base songs
+        existing_numeric_ids = []
+        for s in songs:
+            sid = s.get('id', '')
+            if sid.startswith('song_'):
+                try:
+                    existing_numeric_ids.append(int(sid.split('_')[1]))
+                except ValueError:
+                    pass
+        next_id_num = max(existing_numeric_ids) + 1 if existing_numeric_ids else 1
         
-        # Check if we have manual edits for this file
-        if filename in manual_edits:
-            print(f"[{idx+1}/{len(files)}] Applying manual edits override for {filename}...")
-            edit = manual_edits[filename]
+        # Map existing songs by filename for in-place updating
+        songs_by_filename = {s['filename']: s for s in songs if s.get('filename')}
+        
+        for filename in files:
+            file_path = os.path.join(import_dir, filename)
             
-            # Still run paragraph extraction to extract any embedded images to web media folder
-            try:
-                extract_paragraphs_from_docx(file_path, song_id, web_media_dir)
-            except Exception as e:
-                print(f"  Warning extracting images for overridden song: {e}")
+            # Re-use ID if filename already exists, otherwise allocate next ID
+            existing_song = songs_by_filename.get(filename)
+            if existing_song:
+                song_id = existing_song['id']
+            else:
+                song_id = f"song_{next_id_num}"
+                next_id_num += 1
                 
-            song_data = {
-                "id": song_id,
-                "title": edit.get("title", filename.replace(".docx", "")),
-                "artist": edit.get("artist", "Unknown Artist"),
-                "key": edit.get("key", ""),
-                "isRTL": edit.get("isRTL", False),
-                "rawText": edit.get("rawText", ""),
-                "filename": filename
-            }
-            songs.append(song_data)
-            continue
-
-        print(f"[{idx+1}/{len(files)}] Parsing {filename}...")
-        paragraphs = extract_paragraphs_from_docx(file_path, song_id, web_media_dir)
-        song_data = extract_metadata_and_lyrics(paragraphs, filename)
-        
-        if song_data:
-            song_data["id"] = song_id
-            songs.append(song_data)
-        else:
-            print(f"  Warning: No text extracted from {filename}")
-
-    # Append custom songs from manual edits
-    custom_songs_count = 0
-    for key, edit in manual_edits.items():
-        if not key.lower().endswith('.docx'):
-            print(f"Adding custom song from edits: {edit.get('title')}")
-            songs.append({
-                "id": key,
-                "title": edit.get("title", "Untitled Song"),
-                "artist": edit.get("artist", "Unknown Artist"),
-                "key": edit.get("key", ""),
-                "isRTL": edit.get("isRTL", False),
-                "rawText": edit.get("rawText", "")
-            })
-            custom_songs_count += 1
-    if custom_songs_count > 0:
-        print(f"Appended {custom_songs_count} custom songs.")
-
-    # Search the web for missing artist names automatically
-    print("\nLooking up missing artist names online...")
-    import urllib.request
-    import urllib.parse
-    import time
-    
-    cache_file = os.path.join(script_dir, 'artist_cache.json')
-    translation_file = os.path.join(script_dir, 'artist_translation.json')
-    
-    artist_cache = {}
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                artist_cache = json.load(f)
-            print(f"Loaded {len(artist_cache)} cached artists from {cache_file}")
-        except Exception as e:
-            print(f"Error loading cache: {e}")
-
-    translations = {}
-    if os.path.exists(translation_file):
-        try:
-            with open(translation_file, 'r', encoding='utf-8') as f:
-                translations = json.load(f)
-            print(f"Loaded {len(translations)} artist translations from {translation_file}")
-        except Exception as e:
-            print(f"Error loading translations: {e}")
-
-    # Also load from existing web/songs-data.js to salvage previously resolved artists
-    js_output_file = os.path.join(web_dir, 'songs-data.js')
-    if os.path.exists(js_output_file):
-        try:
-            with open(js_output_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            # Extract JSON array between window.defaultSongs = and the trailing ;
-            json_start = content.find("window.defaultSongs = ")
-            if json_start != -1:
-                json_str = content[json_start + len("window.defaultSongs = "):].strip()
-                if json_str.endswith(";"):
-                    json_str = json_str[:-1].strip()
-                existing_songs = json.loads(json_str)
-                salvaged_count = 0
-                for s in existing_songs:
-                    if s.get("artist") and s["artist"] != "Unknown Artist":
-                        # Clean title for cache key mapping
-                        search_title = re.sub(r'\(.*?\)|\[.*?\]', '', s["title"]).strip()
-                        if search_title not in artist_cache:
-                            artist_cache[search_title] = s["artist"]
-                            salvaged_count += 1
-                if salvaged_count > 0:
-                    print(f"Salvaged {salvaged_count} artist mappings from existing songs-data.js")
-                    # Save cache immediately
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(artist_cache, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"Error salvaging existing artists: {e}")
-
-    unknown_songs = [s for s in songs if s["artist"] == "Unknown Artist"]
-    if unknown_songs:
-        print(f"Found {len(unknown_songs)} songs with Unknown Artist. Looking up in cache or iTunes Search API...")
-        consecutive_429s = 0
-        for i, song in enumerate(unknown_songs):
-            title = song["title"]
-            # Clean title
-            search_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
-            
-            # Check cache first
-            if search_title in artist_cache:
-                cached_val = artist_cache[search_title]
-                if cached_val and cached_val != "Unknown Artist":
-                    song["artist"] = cached_val
-                continue
+            # Check if we have manual edits for this file
+            if filename in manual_edits:
+                print(f"Applying manual edits override for {filename}...")
+                edit = manual_edits[filename]
                 
-            # If not in cache, query API
-            try:
-                # Rate limiting delay between network calls (1.5s is standard to avoid 429)
-                time.sleep(1.5)
-                
-                url = f"https://itunes.apple.com/search?term={urllib.parse.quote(search_title)}&media=music&limit=1"
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                
-                fetched_artist = None
-                for attempt in range(2):
-                    try:
-                        with urllib.request.urlopen(req, timeout=5) as response:
-                            data = json.loads(response.read().decode('utf-8'))
-                            if data.get('results'):
-                                fetched_artist = data['results'][0]['artistName']
-                            consecutive_429s = 0  # Reset on success
-                            break
-                    except urllib.error.HTTPError as he:
-                        if he.code == 429:
-                            consecutive_429s += 1
-                            if consecutive_429s >= 3:
-                                raise Exception("Too many consecutive 429 Rate Limit errors")
-                            print("  Rate limited (429). Sleeping 10 seconds before retry...")
-                            time.sleep(10)
-                        else:
-                            raise he
-
-                if fetched_artist:
-                    if song["isRTL"] and fetched_artist in translations:
-                        fetched_artist = translations[fetched_artist]
-                    song["artist"] = fetched_artist
-                    artist_cache[search_title] = fetched_artist
-                    # Save cache file immediately on new discovery
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(artist_cache, f, ensure_ascii=False, indent=2)
-                        
-                    safe_title = title.encode('ascii', 'xmlcharrefreplace').decode()
-                    safe_artist = fetched_artist.encode('ascii', 'xmlcharrefreplace').decode()
-                    print(f"  [{i+1}/{len(unknown_songs)}] {safe_title} -> {safe_artist} (discovered & cached)")
+                # Still run paragraph extraction to extract any embedded images to web media folder
+                try:
+                    extract_paragraphs_from_docx(file_path, song_id, web_media_dir)
+                except Exception as e:
+                    print(f"  Warning extracting images for overridden song: {e}")
+                    
+                song_data = {
+                    "id": song_id,
+                    "title": edit.get("title", filename.replace(".docx", "")),
+                    "artist": edit.get("artist", "Unknown Artist"),
+                    "key": edit.get("key", ""),
+                    "isRTL": edit.get("isRTL", False),
+                    "rawText": edit.get("rawText", ""),
+                    "filename": filename
+                }
+            else:
+                print(f"Parsing {filename}...")
+                paragraphs = extract_paragraphs_from_docx(file_path, song_id, web_media_dir)
+                song_data = extract_metadata_and_lyrics(paragraphs, filename)
+                if song_data:
+                    song_data["id"] = song_id
                 else:
-                    print(f"  [{i+1}/{len(unknown_songs)}] {title.encode('ascii', 'xmlcharrefreplace').decode()} -> Not found")
-                    artist_cache[search_title] = "Unknown Artist" # Cache negative result to avoid re-querying
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        json.dump(artist_cache, f, ensure_ascii=False, indent=2)
+                    print(f"  Warning: No text extracted from {filename}")
+            
+            if song_data:
+                if existing_song:
+                    # Replace in-place
+                    idx = songs.index(existing_song)
+                    songs[idx] = song_data
+                    songs_by_filename[filename] = song_data
+                else:
+                    songs.append(song_data)
+                    
+        # Append custom songs from manual edits that are not docx overrides
+        custom_songs_count = 0
+        for key, edit in manual_edits.items():
+            if not key.lower().endswith('.docx'):
+                # Check if custom song ID is already added
+                if not any(s['id'] == key for s in songs):
+                    print(f"Adding custom song from edits: {edit.get('title')}")
+                    songs.append({
+                        "id": key,
+                        "title": edit.get("title", "Untitled Song"),
+                        "artist": edit.get("artist", "Unknown Artist"),
+                        "key": edit.get("key", ""),
+                        "isRTL": edit.get("isRTL", False),
+                        "rawText": edit.get("rawText", "")
+                    })
+                    custom_songs_count += 1
+        if custom_songs_count > 0:
+            print(f"Appended {custom_songs_count} custom songs.")
+
+        # Search the web for missing artist names automatically
+        print("\nLooking up missing artist names online...")
+        import urllib.request
+        import urllib.parse
+        import time
+        
+        cache_file = os.path.join(script_dir, 'artist_cache.json')
+        translation_file = os.path.join(script_dir, 'artist_translation.json')
+        
+        artist_cache = {}
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    artist_cache = json.load(f)
+                print(f"Loaded {len(artist_cache)} cached artists from {cache_file}")
             except Exception as e:
-                print(f"  Lookup error for '{title.encode('ascii', 'xmlcharrefreplace').decode()}': {e}")
-                if "429" in str(e) or consecutive_429s >= 3:
-                    print("  Stopping lookup to avoid rate limit bans.")
-                    break
+                print(f"Error loading cache: {e}")
+
+        translations = {}
+        if os.path.exists(translation_file):
+            try:
+                with open(translation_file, 'r', encoding='utf-8') as f:
+                    translations = json.load(f)
+                print(f"Loaded {len(translations)} artist translations from {translation_file}")
+            except Exception as e:
+                print(f"Error loading translations: {e}")
+
+        # Also load from existing web/songs-data.js to salvage previously resolved artists
+        js_output_file = os.path.join(web_dir, 'songs-data.js')
+        if os.path.exists(js_output_file):
+            try:
+                with open(js_output_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                # Extract JSON array between window.defaultSongs = and the trailing ;
+                json_start = content.find("window.defaultSongs = ")
+                if json_start != -1:
+                    json_str = content[json_start + len("window.defaultSongs = "):].strip()
+                    if json_str.endswith(";"):
+                        json_str = json_str[:-1].strip()
+                    existing_songs = json.loads(json_str)
+                    salvaged_count = 0
+                    for s in existing_songs:
+                        if s.get("artist") and s["artist"] != "Unknown Artist":
+                            search_title = re.sub(r'\(.*?\)|\[.*?\]', '', s["title"]).strip()
+                            if search_title not in artist_cache:
+                                artist_cache[search_title] = s["artist"]
+                                salvaged_count += 1
+                    if salvaged_count > 0:
+                        print(f"Salvaged {salvaged_count} artist mappings from existing songs-data.js")
+                        with open(cache_file, 'w', encoding='utf-8') as f:
+                            json.dump(artist_cache, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"Error salvaging existing artists: {e}")
+
+        unknown_songs = [s for s in songs if s["artist"] == "Unknown Artist"]
+        if unknown_songs:
+            print(f"Found {len(unknown_songs)} songs with Unknown Artist. Looking up in cache or iTunes Search API...")
+            consecutive_429s = 0
+            for i, song in enumerate(unknown_songs):
+                title = song["title"]
+                search_title = re.sub(r'\(.*?\)|\[.*?\]', '', title).strip()
+                
+                # Check cache first
+                if search_title in artist_cache:
+                    cached_val = artist_cache[search_title]
+                    if cached_val and cached_val != "Unknown Artist":
+                        song["artist"] = cached_val
+                    continue
+                    
+                # If not in cache, query API
+                try:
+                    time.sleep(1.5)
+                    url = f"https://itunes.apple.com/search?term={urllib.parse.quote(search_title)}&media=music&limit=1"
+                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                    
+                    fetched_artist = None
+                    for attempt in range(2):
+                        try:
+                            with urllib.request.urlopen(req, timeout=5) as response:
+                                data = json.loads(response.read().decode('utf-8'))
+                                if data.get('results'):
+                                    fetched_artist = data['results'][0]['artistName']
+                                consecutive_429s = 0
+                                break
+                        except urllib.error.HTTPError as he:
+                            if he.code == 429:
+                                consecutive_429s += 1
+                                if consecutive_429s >= 3:
+                                    raise Exception("Too many consecutive 429 Rate Limit errors")
+                                print("  Rate limited (429). Sleeping 10 seconds before retry...")
+                                time.sleep(10)
+                            else:
+                                raise he
+
+                    if fetched_artist:
+                        if song["isRTL"] and fetched_artist in translations:
+                            fetched_artist = translations[fetched_artist]
+                        song["artist"] = fetched_artist
+                        artist_cache[search_title] = fetched_artist
+                        with open(cache_file, 'w', encoding='utf-8') as f:
+                            json.dump(artist_cache, f, ensure_ascii=False, indent=2)
+                            
+                        safe_title = title.encode('ascii', 'xmlcharrefreplace').decode()
+                        safe_artist = fetched_artist.encode('ascii', 'xmlcharrefreplace').decode()
+                        print(f"  [{i+1}/{len(unknown_songs)}] {safe_title} -> {safe_artist} (discovered & cached)")
+                    else:
+                        print(f"  [{i+1}/{len(unknown_songs)}] {title.encode('ascii', 'xmlcharrefreplace').decode()} -> Not found")
+                        artist_cache[search_title] = "Unknown Artist"
+                        with open(cache_file, 'w', encoding='utf-8') as f:
+                            json.dump(artist_cache, f, ensure_ascii=False, indent=2)
+                except Exception as e:
+                    print(f"  Lookup error for '{title.encode('ascii', 'xmlcharrefreplace').decode()}': {e}")
+                    if "429" in str(e) or consecutive_429s >= 3:
+                        print("  Stopping lookup to avoid rate limit bans.")
+                        break
+
+    # Save the updated source of truth backup file back to songs_db/songbook_backup.json
+    try:
+        os.makedirs(songs_db_dir, exist_ok=True)
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(songs, f, ensure_ascii=False, indent=2)
+        print(f"Updated source of truth database at: {backup_file}")
+    except Exception as e:
+        print(f"Error saving updated backup file to {backup_file}: {e}")
 
     # Write output JS (for Offline WebView / local script loading support)
     import datetime
@@ -519,7 +564,7 @@ def main():
         json.dump(songs, f, ensure_ascii=False, indent=2)
         f.write(";\n")
 
-    print(f"\nSuccess! Successfully converted {len(songs)} songs.")
+    print(f"\nSuccess! Successfully processed {len(songs)} songs.")
     print(f"Database saved to: {output_file} and {js_output_file}")
     
     hebrew_count = sum(1 for s in songs if s["isRTL"])

@@ -10,8 +10,10 @@ let state = {
   currentSongId: null,
   transposeOffset: 0,
   fontSize: 1.0,
-  scrollSpeed: 3,
+  scrollSpeed: 5,
   isScrolling: false,
+  scrollAccumulator: 0,
+  lastSetScrollTop: 0,
   preferFlats: false,
   theme: 'light',
   wakeLock: null,
@@ -24,6 +26,8 @@ let state = {
   activeTab: 'songs', // 'songs' | 'setlists'
   activeSetlistId: null,
   activeSetlistSongIndex: null,
+  setlistSearchIndex: -1,
+  setlistSearchSongs: [],
 
   // Metronome state
   metroBpm: 120,
@@ -92,6 +96,9 @@ const el = {
   toastNotify: document.getElementById('toast-notify'),
   maximizeBtn: document.getElementById('maximize-btn'),
   restoreBtn: document.getElementById('restore-btn'),
+  fullscreenControls: document.getElementById('fullscreen-controls'),
+  fullscreenScrollToggleBtn: document.getElementById('fullscreen-scroll-toggle-btn'),
+  fullscreenScrollSpeedSlider: document.getElementById('fullscreen-scroll-speed-slider'),
 
   // Setlist feature elements
   tabSongsBtn: document.getElementById('tab-songs-btn'),
@@ -101,7 +108,8 @@ const el = {
   setlistBackBtn: document.getElementById('setlist-back-btn'),
   setlistNameInput: document.getElementById('setlist-name-input'),
   setlistDeleteBtn: document.getElementById('setlist-delete-btn'),
-  setlistAddSongSelect: document.getElementById('setlist-add-song-select'),
+  setlistAddSongSearch: document.getElementById('setlist-add-song-search'),
+  setlistAddSongDropdown: document.getElementById('setlist-add-song-dropdown'),
   setlistSongsContainer: document.getElementById('setlist-songs-container'),
   songsFooter: document.getElementById('songs-footer'),
   setlistsFooter: document.getElementById('setlists-footer'),
@@ -139,6 +147,9 @@ const el = {
   formRemarks: document.getElementById('form-remarks'),
   editorBoldBtn: document.getElementById('editor-bold-btn'),
   editorHighlightBtn: document.getElementById('editor-highlight-btn'),
+  editorHighlightGreenBtn: document.getElementById('editor-highlight-green-btn'),
+  editorImportImageBtn: document.getElementById('editor-import-image-btn'),
+  editorImageInput: document.getElementById('editor-image-input'),
   importDocxGroup: document.getElementById('import-docx-group'),
   formImportFile: document.getElementById('form-import-file'),
   importStatus: document.getElementById('import-status'),
@@ -307,7 +318,10 @@ function formatLyricText(str) {
     .replace(/&lt;b&gt;([\s\S]*?)&lt;\/b&gt;/g, '<strong>$1</strong>')
     // Convert standard highlight (==text==) and html highlight (<mark>text</mark>)
     .replace(/==([\s\S]*?)==/g, '<mark class="song-highlight">$1</mark>')
-    .replace(/&lt;mark&gt;([\s\S]*?)&lt;\/mark&gt;/g, '<mark class="song-highlight">$1</mark>');
+    .replace(/&lt;mark&gt;([\s\S]*?)&lt;\/mark&gt;/g, '<mark class="song-highlight">$1</mark>')
+    // Convert green highlight (%%text%%) and html green highlight (<mark class="song-highlight-green">text</mark>)
+    .replace(/%%([\s\S]*?)%%/g, '<mark class="song-highlight-green">$1</mark>')
+    .replace(/&lt;mark class=&quot;song-highlight-green&quot;&gt;([\s\S]*?)&lt;\/mark&gt;/g, '<mark class="song-highlight-green">$1</mark>');
   
   return escaped;
 }
@@ -323,6 +337,9 @@ function formatSegmentText(text, state) {
   if (state.highlight) {
     resultHtml += '<mark class="song-highlight">';
   }
+  if (state.highlightGreen) {
+    resultHtml += '<mark class="song-highlight-green">';
+  }
   
   let i = 0;
   while (i < text.length) {
@@ -334,6 +351,10 @@ function formatSegmentText(text, state) {
       state.highlight = !state.highlight;
       resultHtml += state.highlight ? '<mark class="song-highlight">' : '</mark>';
       i += 2;
+    } else if (text.substring(i, i + 2) === '%%') {
+      state.highlightGreen = !state.highlightGreen;
+      resultHtml += state.highlightGreen ? '<mark class="song-highlight-green">' : '</mark>';
+      i += 2;
     } else {
       resultHtml += escapeHTML(text[i]);
       i++;
@@ -341,6 +362,9 @@ function formatSegmentText(text, state) {
   }
   
   // Close active formatting tags at the end of the segment to keep HTML valid
+  if (state.highlightGreen) {
+    resultHtml += '</mark>';
+  }
   if (state.highlight) {
     resultHtml += '</mark>';
   }
@@ -351,13 +375,13 @@ function formatSegmentText(text, state) {
   return resultHtml;
 }
 
-// Clean chord names ending with 0, o, or O to display as 'dim'
+// Clean chord names ending with o or O to display as 'dim'
 function cleanChordNameForDisplay(chordStr) {
   if (!chordStr) return '';
 
   const cleanSingle = (str) => {
     const trimmed = str.trim();
-    if (trimmed.endsWith('0') || trimmed.endsWith('o') || trimmed.endsWith('O')) {
+    if (trimmed.endsWith('o') || trimmed.endsWith('O')) {
       return trimmed.slice(0, -1) + 'dim';
     }
     return trimmed;
@@ -593,10 +617,13 @@ function bindEvents(db) {
     });
   }
 
-  // Close toolbar search dropdown when clicking outside
+  // Close search dropdowns when clicking outside
   document.addEventListener('click', (e) => {
     if (el.toolbarSearchDropdown && !e.target.closest('.search-wrapper')) {
       el.toolbarSearchDropdown.style.display = 'none';
+    }
+    if (el.setlistAddSongDropdown && !e.target.closest('#setlist-add-song-search') && !e.target.closest('#setlist-add-song-dropdown')) {
+      el.setlistAddSongDropdown.style.display = 'none';
     }
   });
 
@@ -666,11 +693,41 @@ function bindEvents(db) {
   // Auto Scroll Slider
   el.scrollSpeedSlider.addEventListener('input', (e) => {
     state.scrollSpeed = parseInt(e.target.value);
+    if (el.fullscreenScrollSpeedSlider) {
+      el.fullscreenScrollSpeedSlider.value = e.target.value;
+    }
   });
+
+  if (el.fullscreenScrollSpeedSlider) {
+    el.fullscreenScrollSpeedSlider.addEventListener('input', (e) => {
+      state.scrollSpeed = parseInt(e.target.value);
+      if (el.scrollSpeedSlider) {
+        el.scrollSpeedSlider.value = e.target.value;
+      }
+    });
+  }
 
   // Auto Scroll Toggle
   el.scrollToggleBtn.addEventListener('click', () => {
     toggleAutoScroll();
+  });
+
+  if (el.fullscreenScrollToggleBtn) {
+    el.fullscreenScrollToggleBtn.addEventListener('click', () => {
+      toggleAutoScroll();
+    });
+  }
+
+  // Synchronize scroll accumulator on manual user scroll to prevent scroll fighting
+  el.songViewport.addEventListener('scroll', () => {
+    if (state.isScrolling) {
+      const currentScroll = el.songViewport.scrollTop;
+      const diff = Math.abs(currentScroll - state.lastSetScrollTop);
+      if (diff > 2) {
+        state.scrollAccumulator = currentScroll;
+      }
+      state.lastSetScrollTop = currentScroll;
+    }
   });
 
   // Wake Lock Button
@@ -744,13 +801,75 @@ function bindEvents(db) {
     });
   }
 
+  if (el.editorHighlightGreenBtn) {
+    el.editorHighlightGreenBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      wrapTextSelection('%%', '%%');
+    });
+  }
+
+
+
+  // Click on import button triggers file selection
+  if (el.editorImportImageBtn && el.editorImageInput) {
+    el.editorImportImageBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      el.editorImageInput.click();
+    });
+
+    // Handle selected file
+    el.editorImageInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxW = 1024;
+          let w = img.width;
+          let h = img.height;
+          
+          if (w > maxW) {
+            h = Math.round((h * maxW) / w);
+            w = maxW;
+          }
+          
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          
+          // Compress to JPEG with 0.7 quality
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          insertImageToken(compressedDataUrl);
+          
+          // Clear input value so same file can be re-imported if needed
+          el.editorImageInput.value = '';
+        };
+        img.onerror = () => {
+          showToast("Failed to load image file.");
+          el.editorImageInput.value = '';
+        };
+        img.src = evt.target.result;
+      };
+      reader.onerror = () => {
+        showToast("Failed to read image file.");
+        el.editorImageInput.value = '';
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
   // Save Song Button
   el.saveSongBtn.addEventListener('click', async () => {
     const title = el.formTitle.value.trim();
     const artist = el.formArtist.value.trim() || 'Unknown Artist';
     const key = el.formKey.value.trim();
     const isRTL = el.formRtl.checked;
-    const rawText = el.formText.value.trim();
+    const rawText = getRawTextFromEditor();
 
     if (!title || !rawText) {
       showToast("Title and lyrics content are required.");
@@ -832,6 +951,7 @@ function bindEvents(db) {
         state.songs.push(song);
         showToast("Song added successfully.");
       }
+      updateSongCount();
 
       // Sync UI
       state.filteredSongs = [...state.songs];
@@ -880,6 +1000,7 @@ function bindEvents(db) {
 
         state.songs = state.songs.filter(s => s.id !== id);
         state.filteredSongs = [...state.songs];
+        updateSongCount();
 
         closeSongModal();
 
@@ -1587,27 +1708,42 @@ function bindEvents(db) {
     });
   }
 
-  if (el.setlistAddSongSelect) {
-    el.setlistAddSongSelect.addEventListener('change', async (e) => {
-      const songId = e.target.value;
-      if (!songId) return;
+  if (el.setlistAddSongSearch) {
+    el.setlistAddSongSearch.addEventListener('input', (e) => {
+      renderSetlistAddSongDropdown(e.target.value);
+    });
 
-      const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
-      if (!setlist) return;
+    el.setlistAddSongSearch.addEventListener('focus', () => {
+      renderSetlistAddSongDropdown(el.setlistAddSongSearch.value);
+    });
 
-      // Add song with default transpose offset of 0
-      setlist.songs.push({ songId, transposeOffset: 0 });
+    el.setlistAddSongSearch.addEventListener('keydown', (e) => {
+      const dropdown = el.setlistAddSongDropdown;
+      if (!dropdown) return;
+      const items = dropdown.querySelectorAll('.search-dropdown-item');
+      if (items.length === 0) return;
 
-      try {
-        if (db) {
-          await dbPutSetlist(db, setlist);
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        state.setlistSearchIndex = (state.setlistSearchIndex + 1) % items.length;
+        updateSetlistDropdownHighlight(items);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        state.setlistSearchIndex = (state.setlistSearchIndex - 1 + items.length) % items.length;
+        updateSetlistDropdownHighlight(items);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (state.setlistSearchIndex >= 0 && state.setlistSearchIndex < state.setlistSearchSongs.length) {
+          const selectedSong = state.setlistSearchSongs[state.setlistSearchIndex];
+          addSongToActiveSetlist(selectedSong.id);
+        } else if (state.setlistSearchSongs.length > 0) {
+          // Default to first result if none highlighted
+          addSongToActiveSetlist(state.setlistSearchSongs[0].id);
         }
-        el.setlistAddSongSelect.value = ''; // reset dropdown
-        renderSetlistEditor();
-        showToast("Song added to setlist.");
-      } catch (err) {
-        console.error(err);
-        showToast("Failed to add song.");
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        dropdown.style.display = 'none';
+        el.setlistAddSongSearch.blur();
       }
     });
   }
@@ -2284,7 +2420,7 @@ function renderActiveSong() {
 
         if (line.type === 'chord-lyric') {
           lineDiv.className = 'chord-lyric-line';
-          let formattingState = { bold: false, highlight: false };
+          let formattingState = { bold: false, highlight: false, highlightGreen: false };
           line.segments.forEach(seg => {
             const segSpan = document.createElement('span');
             segSpan.className = 'chord-segment';
@@ -2389,12 +2525,22 @@ function toggleAutoScroll() {
   if (state.isScrolling) {
     el.scrollToggleBtn.textContent = 'Pause';
     el.scrollToggleBtn.classList.add('active');
+    if (el.fullscreenScrollToggleBtn) {
+      el.fullscreenScrollToggleBtn.textContent = 'Pause';
+      el.fullscreenScrollToggleBtn.classList.add('active');
+    }
     lastScrollTime = performance.now();
+    state.scrollAccumulator = el.songViewport.scrollTop;
+    state.lastSetScrollTop = el.songViewport.scrollTop;
     scrollAnimationId = requestAnimationFrame(autoScrollStep);
     showToast("Auto-scroll started.");
   } else {
     el.scrollToggleBtn.textContent = 'Play';
     el.scrollToggleBtn.classList.remove('active');
+    if (el.fullscreenScrollToggleBtn) {
+      el.fullscreenScrollToggleBtn.textContent = 'Play';
+      el.fullscreenScrollToggleBtn.classList.remove('active');
+    }
     if (scrollAnimationId) {
       cancelAnimationFrame(scrollAnimationId);
       scrollAnimationId = null;
@@ -2423,19 +2569,23 @@ function autoScrollStep(timestamp) {
     elapsed = 50;
   }
 
-  // 5 levels: 1 = min (1 row in 1.0 sec), 5 = max (1 row in 0.5 sec)
-  const clampedSpeed = Math.max(1, Math.min(5, state.scrollSpeed));
-  const T = 1.0 - (clampedSpeed - 1) * 0.025; // 1->1.0s, 2->0.875s, 3->0.75s, 4->0.625s, 5->0.5s
-  const speedRatio = getRowHeight() / (T * 1000);
+  // 10 levels of speed using an exponential scale (slower at min, much faster at max)
+  const clampedSpeed = Math.max(1, Math.min(10, state.scrollSpeed));
+  
+  // Calculate speed in pixels per second (matches linear visual speed independent of font size)
+  const pxPerSec = 2.0 + Math.pow(1.65, clampedSpeed - 1) * 1.5;
+  const speedRatio = pxPerSec / 1000.0;
   const scrollDelta = elapsed * speedRatio;
 
   if (scrollDelta > 0) {
-    el.songViewport.scrollTop += scrollDelta;
+    state.scrollAccumulator += scrollDelta;
+    el.songViewport.scrollTop = Math.round(state.scrollAccumulator);
+    state.lastSetScrollTop = el.songViewport.scrollTop;
     lastScrollTime = timestamp;
 
     // Check if we hit the bottom of the viewport
     const maxScrollTop = el.songViewport.scrollHeight - el.songViewport.clientHeight;
-    if (el.songViewport.scrollTop >= maxScrollTop - 2) {
+    if (el.songViewport.scrollTop >= maxScrollTop - 3) {
       toggleAutoScroll(); // stop at bottom
       return;
     }
@@ -2571,6 +2721,150 @@ function positionTooltip(targetEl) {
   el.chordTooltip.style.left = `${left}px`;
 }
 
+// Helper to update editor thumbnails preview
+function updateEditorImagePreviews() {
+  const container = document.getElementById('editor-image-preview-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+  if (!state.editorImages || state.editorImages.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'flex';
+  state.editorImages.forEach((src, idx) => {
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'relative';
+    wrapper.style.width = '60px';
+    wrapper.style.height = '60px';
+    wrapper.style.border = '1px solid var(--border-color)';
+    wrapper.style.borderRadius = '6px';
+    wrapper.style.overflow = 'hidden';
+    wrapper.style.backgroundColor = 'var(--bg-primary)';
+
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'cover';
+    img.title = `Image ${idx + 1}`;
+
+    // Index label
+    const label = document.createElement('span');
+    label.textContent = idx + 1;
+    label.style.position = 'absolute';
+    label.style.bottom = '2px';
+    label.style.left = '2px';
+    label.style.backgroundColor = 'rgba(0, 0, 0, 0.65)';
+    label.style.color = '#fff';
+    label.style.fontSize = '0.65rem';
+    label.style.fontWeight = 'bold';
+    label.style.padding = '1px 4px';
+    label.style.borderRadius = '2px';
+    label.style.lineHeight = '1';
+
+    // Remove button
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.style.position = 'absolute';
+    removeBtn.style.top = '2px';
+    removeBtn.style.right = '2px';
+    removeBtn.style.width = '16px';
+    removeBtn.style.height = '16px';
+    removeBtn.style.borderRadius = '50%';
+    removeBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.9)';
+    removeBtn.style.color = '#fff';
+    removeBtn.style.border = 'none';
+    removeBtn.style.fontSize = '10px';
+    removeBtn.style.display = 'flex';
+    removeBtn.style.alignItems = 'center';
+    removeBtn.style.justifyContent = 'center';
+    removeBtn.style.cursor = 'pointer';
+    removeBtn.style.padding = '0';
+    removeBtn.title = 'Remove Image';
+
+    removeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.editorImages.splice(idx, 1);
+      
+      // Remove placeholder from textarea
+      const placeholder = `[IMAGE: ${idx + 1}]`;
+      let text = el.formText.value;
+      text = text.replace(placeholder, '');
+      
+      // Shift subsequent placeholders: e.g. [IMAGE: 3] becomes [IMAGE: 2]
+      for (let i = idx + 2; i <= state.editorImages.length + 1; i++) {
+        const oldPlaceholder = `[IMAGE: ${i}]`;
+        const newPlaceholder = `[IMAGE: ${i - 1}]`;
+        text = text.replace(oldPlaceholder, newPlaceholder);
+      }
+
+      el.formText.value = text;
+      el.formText.dispatchEvent(new Event('input', { bubbles: true }));
+      updateEditorImagePreviews();
+    });
+
+    wrapper.appendChild(img);
+    wrapper.appendChild(label);
+    wrapper.appendChild(removeBtn);
+    container.appendChild(wrapper);
+  });
+}
+
+// Helper to reconstruct rawText by replacing index placeholders with full sources
+function getRawTextFromEditor() {
+  let text = el.formText.value;
+  if (state.editorImages && state.editorImages.length > 0) {
+    const placeholderRegex = /\[IMAGE:\s*(\d+)\]/g;
+    text = text.replace(placeholderRegex, (fullMatch, numberStr) => {
+      const idx = parseInt(numberStr, 10) - 1;
+      if (idx >= 0 && idx < state.editorImages.length) {
+        return `[IMAGE: ${state.editorImages[idx]}]`;
+      }
+      return fullMatch;
+    });
+  }
+  return text.trim();
+}
+
+// Helper to insert image token at cursor position
+function insertImageToken(base64Data) {
+  const textarea = el.formText;
+  if (!textarea) return;
+
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const text = textarea.value;
+  
+  let prefix = '';
+  let suffix = '';
+  
+  if (start > 0 && text[start - 1] !== '\n') {
+    prefix = '\n';
+  }
+  if (end < text.length && text[end] !== '\n') {
+    suffix = '\n';
+  }
+  
+  state.editorImages.push(base64Data);
+  const imgIndex = state.editorImages.length;
+  
+  const replacement = `${prefix}[IMAGE: ${imgIndex}]${suffix}`;
+  textarea.value = text.substring(0, start) + replacement + text.substring(end);
+  
+  // Trigger input event to update preview/dirty state
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  
+  textarea.focus();
+  textarea.selectionStart = start + replacement.length;
+  textarea.selectionEnd = start + replacement.length;
+
+  // Update previews
+  updateEditorImagePreviews();
+}
+
 // Modal open/close actions
 function openSongModal(song = null) {
   // Clear fields
@@ -2584,6 +2878,9 @@ function openSongModal(song = null) {
 
   if (el.formImportFile) el.formImportFile.value = '';
   if (el.importStatus) el.importStatus.textContent = '';
+  
+  // Initialize/Reset temporary image store
+  state.editorImages = [];
 
   const isSetlistEdit = !!(state.activeSetlistId && state.activeSetlistSongIndex !== null);
   if (el.remarksGroup) {
@@ -2598,7 +2895,19 @@ function openSongModal(song = null) {
     el.formArtist.value = song.artist === 'Unknown Artist' ? '' : song.artist;
     el.formKey.value = song.key || '';
     el.formRtl.checked = song.isRTL;
-    el.formText.value = song.rawText;
+    
+    // Parse rawText to extract full image sources and replace them with short placeholders
+    let rawText = song.rawText || '';
+    const imageRegex = /\[IMAGE:\s*([^\]]+)\]/g;
+    let imgCount = 0;
+    
+    const cleanText = rawText.replace(imageRegex, (fullMatch, imgSource) => {
+      state.editorImages.push(imgSource.trim());
+      imgCount++;
+      return `[IMAGE: ${imgCount}]`;
+    });
+    el.formText.value = cleanText;
+
     if (el.formRemarks) {
       el.formRemarks.value = song.remarks || '';
     }
@@ -2610,6 +2919,9 @@ function openSongModal(song = null) {
     el.deleteSongBtn.style.display = 'none';
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'block';
   }
+
+  // Render previews for loaded images (if any)
+  updateEditorImagePreviews();
 
   updateFormTextDirection();
 
@@ -2673,7 +2985,14 @@ function renderToolbarSetlistSelect() {
   }
 }
 
+function updateSongCount() {
+  if (el.tabSongsBtn) {
+    el.tabSongsBtn.textContent = `Songs (${state.songs.length})`;
+  }
+}
+
 function renderSidebar() {
+  updateSongCount();
   if (el.toolbarSetlistSelect) {
     el.toolbarSetlistSelect.value = state.activeSetlistId || '';
   }
@@ -2799,14 +3118,16 @@ function renderSetlistEditor() {
 
   el.setlistNameInput.value = setlist.name;
 
-  // Populate songs dropdown
-  el.setlistAddSongSelect.innerHTML = '<option value="">+ Add Song to Setlist...</option>';
-  state.songs.forEach(song => {
-    const opt = document.createElement('option');
-    opt.value = song.id;
-    opt.textContent = `${song.title} (${song.artist})`;
-    el.setlistAddSongSelect.appendChild(opt);
-  });
+  // Reset setlist song search state
+  if (el.setlistAddSongSearch) {
+    el.setlistAddSongSearch.value = '';
+  }
+  if (el.setlistAddSongDropdown) {
+    el.setlistAddSongDropdown.innerHTML = '';
+    el.setlistAddSongDropdown.style.display = 'none';
+  }
+  state.setlistSearchIndex = -1;
+  state.setlistSearchSongs = [];
 
   // Render songs inside setlist
   el.setlistSongsContainer.innerHTML = '';
@@ -2997,15 +3318,94 @@ async function saveSetlistTransposeOffset() {
   }
 }
 
+function renderSetlistAddSongDropdown(query = '') {
+  if (!el.setlistAddSongDropdown) return;
+  el.setlistAddSongDropdown.innerHTML = '';
+
+  const cleanQuery = query.toLowerCase().trim();
+  state.setlistSearchSongs = state.songs.filter(song => {
+    if (!cleanQuery) return true;
+    return (
+      song.title.toLowerCase().includes(cleanQuery) ||
+      song.artist.toLowerCase().includes(cleanQuery) ||
+      song.key.toLowerCase().includes(cleanQuery)
+    );
+  });
+
+  state.setlistSearchIndex = -1;
+
+  if (state.setlistSearchSongs.length === 0) {
+    el.setlistAddSongDropdown.innerHTML = `
+      <div style="padding: 0.6rem 0.8rem; text-align: center; color: var(--text-secondary); font-size: 0.8rem;">
+        No songs found.
+      </div>
+    `;
+  } else {
+    state.setlistSearchSongs.forEach((song, index) => {
+      const item = document.createElement('div');
+      item.className = 'search-dropdown-item';
+      item.dataset.index = index;
+
+      const cleanTitle = escapeHTML(song.title);
+      const cleanArtist = escapeHTML(song.artist);
+
+      item.innerHTML = `
+        <div class="title">${cleanTitle}</div>
+        <div class="artist">${cleanArtist}</div>
+      `;
+
+      item.addEventListener('click', () => {
+        addSongToActiveSetlist(song.id);
+      });
+      el.setlistAddSongDropdown.appendChild(item);
+    });
+  }
+
+  el.setlistAddSongDropdown.style.display = 'block';
+}
+
+function updateSetlistDropdownHighlight(items) {
+  items.forEach((item, index) => {
+    if (index === state.setlistSearchIndex) {
+      item.classList.add('highlighted');
+      item.scrollIntoView({ block: 'nearest' });
+    } else {
+      item.classList.remove('highlighted');
+    }
+  });
+}
+
+async function addSongToActiveSetlist(songId) {
+  const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
+  if (!setlist) return;
+
+  setlist.songs.push({ songId, transposeOffset: 0 });
+
+  try {
+    if (db) {
+      await dbPutSetlist(db, setlist);
+    }
+    if (el.setlistAddSongSearch) el.setlistAddSongSearch.value = '';
+    if (el.setlistAddSongDropdown) el.setlistAddSongDropdown.style.display = 'none';
+    state.setlistSearchIndex = -1;
+    state.setlistSearchSongs = [];
+    renderSetlistEditor();
+    showToast("Song added to setlist.");
+  } catch (err) {
+    console.error(err);
+    showToast("Failed to add song.");
+  }
+}
+
 function toggleFullscreen(enable) {
   state.isFullscreen = enable;
   const appContainer = document.querySelector('.app-container');
   if (enable) {
     appContainer.classList.add('fullscreen');
-    if (el.restoreBtn) el.restoreBtn.style.display = 'flex';
+    if (el.fullscreenControls) el.fullscreenControls.style.display = 'flex';
   } else {
     appContainer.classList.remove('fullscreen');
-    if (el.restoreBtn) el.restoreBtn.style.display = 'none';
+    if (el.fullscreenControls) el.fullscreenControls.style.display = 'none';
   }
 }
 

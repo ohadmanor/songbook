@@ -8,6 +8,7 @@ stand-alone HTML file: 'songbook.html' in the workspace root.
 
 import os
 import re
+import base64
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +63,45 @@ def main():
     html = inline_script(html, 'parser.js')
     html = inline_script(html, 'app.js')
     
+    # Update defaultSongsVersion to a fresh timestamp for the bundle to force browser cache sync
+    import datetime
+    timestamp = datetime.datetime.now().isoformat()
+    html = re.sub(
+        r"window\.defaultSongsVersion\s*=\s*['\"][^'\"]*['\"];",
+        f"window.defaultSongsVersion = '{timestamp}';",
+        html
+    )
+    
+    # 3.5 Inline media images as base64 in the bundled html
+    media_dir = os.path.join(web_dir, 'media')
+    media_pattern = re.compile(r'media/([a-zA-Z0-9_\.-]+)')
+    matches = media_pattern.findall(html)
+    
+    replaced = {}
+    for filename in set(matches):
+        file_path = os.path.join(media_dir, filename)
+        if os.path.exists(file_path):
+            _, ext = os.path.splitext(filename)
+            ext = ext.lower().replace('.', '')
+            mime_type = f"image/{ext}"
+            if ext in ('jpg', 'jpeg'):
+                mime_type = "image/jpeg"
+            elif ext == 'svg':
+                mime_type = "image/svg+xml"
+            
+            with open(file_path, 'rb') as img_f:
+                b64_bytes = base64.b64encode(img_f.read())
+                b64_data = b64_bytes.decode('utf-8')
+            
+            data_url = f"data:{mime_type};base64,{b64_data}"
+            html = html.replace(f"media/{filename}", data_url)
+            replaced[filename] = len(b64_data)
+            
+    if replaced:
+        print(f"Inlined {len(replaced)} images as Base64 in standalone HTML:")
+        for name, size in replaced.items():
+            print(f"  - media/{name} ({size} b64 chars)")
+
     # 4. Save bundled standalone HTML
     with open(output_html_file, 'w', encoding='utf-8') as f:
         f.write(html)

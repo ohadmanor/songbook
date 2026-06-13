@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.songbook"
         minSdk = 24
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.2.0"
+        versionCode = 12
+        versionName = "1.2.2"
     }
 
     buildTypes {
@@ -163,7 +163,17 @@ val publishReleaseOutputs = tasks.register<PublishOutputsTask>("publishReleaseOu
     dependsOn(bundleHtml)
 }
 
+val publishDebugOutputs = tasks.register<PublishOutputsTask>("publishDebugOutputs") {
+    apkOutputDir.set(layout.buildDirectory.dir("outputs/apk/debug"))
+    destinationDir.set(layout.projectDirectory.dir("../../outputs"))
+    dependsOn(bundleHtml)
+}
+
 tasks.matching { it.name == "assembleRelease" }.configureEach {
     finalizedBy(publishReleaseOutputs)
+}
+
+tasks.matching { it.name == "assembleDebug" }.configureEach {
+    finalizedBy(publishDebugOutputs)
 }
 

@@ -11,8 +11,12 @@ It is distributed as both a **standalone portable HTML sheet** (for any browser 
 * **Dynamic Transposition**: Instantly transpose chords up or down (+/- 11 semitones) and toggle between sharps (`#`) and flats (`b`) enharmonic representations.
 * **Interactive Chord Diagrams**: Hover or tap on any chord to display interactive SVG fingering diagrams for **Guitar** or **Piano** (powered by a custom chord database).
 * **Metronome**: Built-in visual/audio metronome supporting multiple time signatures (`2/4`, `3/4`, `4/4`, `6/8`) and tap/BPM controls.
-* **Auto-Scroll**: Hands-free scrolling with a customizable speed slider to keep page movement in sync with your playing speed.
-* **Theme Customization**: Tailored, high-quality themes (Light, Dark, Sepia, and OLED Black) to ensure optimal legibility under any lighting conditions.
+* **Auto-Scroll**: Hands-free scrolling powered by a smooth sub-pixel rendering engine. Autoscrolling speed is adjustable via an exponential 10-level controller, designed to perfectly match any performance tempo from extremely slow to very fast. Features scroll-syncing that preserves autoscroll speed after manual adjustments.
+* **Built-in Visual Song Editor**: A markup-based song editor directly in the app. Includes:
+  * A formatting toolbar with visual SVG icons for toggling **Bold** (`**text**`), **Yellow Highlight** (`::text::`), and **Green Highlight** (`%%text%%`).
+  * Direct file selection or drag-and-drop to **import and embed images** directly into the song sheet. Imported images are compressed and resized on the fly using a canvas-based scaling algorithm.
+  * An option to toggle between full image display and a minimized placeholder/thumbnail view in the editor, ensuring high editing performance with zero input lag.
+* **Theme Customization**: Tailored, high-quality themes (Light, Dark, Sepia, and OLED Black) to ensure optimal legibility under any lighting conditions, with full rendering support for bold elements and colored highlights.
 * **Setlist Management**: Create custom setlists, reorder songs, adjust individual song transposition settings per setlist, and import/export setlists as JSON.
 * **Database Backup, Restore & Revert**:
   * Export complete database backup as a `.json` file.
@@ -21,7 +25,7 @@ It is distributed as both a **standalone portable HTML sheet** (for any browser 
 * **Distraction-Free Fullscreen Mode**:
   * Click the **Maximize** button in the toolbar to enter fullscreen mode.
   * Hides both the sidebar and the toolbar, expanding the song sheet area to take up 100% of the screen.
-  * Displays a floating glassmorphic Restore button in the top-right corner to exit fullscreen.
+  * Displays a floating glassmorphic minimized controls panel overlay, allowing performance control (Play/Pause, speed adjustment, and maximize toggle) directly on-screen.
   * Supports pressing the `Escape` key to exit.
 
 ---
@@ -113,3 +117,21 @@ The output file [songbook.html](file:///c:/Develop/Github/songbook/outputs/songb
    ./gradlew assembleRelease
    ```
 3. The resulting signed APK will be built at `android/app/build/outputs/apk/release/app-release.apk`.
+
+---
+
+## 🆕 Release History & Changelog
+
+### Version 1.2.2 (Current)
+* **Smooth Sub-Pixel Autoscrolling**: Refactored the autoscroll engine to use sub-pixel increments, providing a buttery-smooth experience.
+* **10-Step Exponential Autoscroll Speed**: Replaced the linear slider with a 10-level exponential range selector, allowing fine control over slow speeds and rapid pacing.
+* **Autoscroll Manual Sync**: Standardized scroll-syncing so that if a musician manually scrolls during play, autoscrolling seamlessly resumes without resetting the speed or causing stutter.
+* **Glassmorphic Fullscreen Overlay**: Fullscreen mode now overlays a floating, minimized glassmorphic control bar containing play/pause, autoscroll speed, and exit buttons.
+* **Visual Editor Toolbar**: Embedded SVG icon buttons for Bold, Highlights (Yellow and Green), and Image Import inside the Edit Song modal.
+* **Green Highlight (`%%`) Support**: Implemented a secondary green highlight markup parsed across all theme backgrounds.
+* **Editor Media Placeholders**: Added a thumbnail/placeholder visibility toggle in the song editor to prevent editor DOM rendering lag on pages containing large embedded images.
+* **On-the-Fly Image Compression**: Canvas-based automatic image resizing and quality optimization during file imports to minimize database and PDF payload sizes.
+
+### Version 1.2.1
+* **Database Backup, Restore & Revert**: Added JSON database export, structured restoration reports, and immediate one-click restore undo.
+* **Distraction-Free Fullscreen**: Enter fullscreen mode via the maximize toolbar icon to hide all peripheral navigation controls.

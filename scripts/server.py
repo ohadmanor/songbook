@@ -185,6 +185,16 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
                     json.dump(songs_list, f, ensure_ascii=False, indent=2)
                     f.write(";\n")
                 print(f"[Server] Restored custom songs and updated songs-data.js (Version: {new_version})")
+
+                # Also update source of truth database backup file
+                backup_file = os.path.join(PROJECT_ROOT, 'songs_db', 'songbook_backup.json')
+                try:
+                    os.makedirs(os.path.dirname(backup_file), exist_ok=True)
+                    with open(backup_file, 'w', encoding='utf-8') as f:
+                        json.dump(songs_list, f, ensure_ascii=False, indent=2)
+                    print(f"[Server] Updated source of truth database at: {backup_file}")
+                except Exception as backup_err:
+                    print(f"[Server] Error updating source of truth backup: {backup_err}")
                 
                 # Trigger standalone HTML bundling
                 print("[Server] Triggering standalone HTML bundling...")
@@ -330,6 +340,16 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f"[Server] Error saving songs-data.js: {e}")
 
+            # Also update source of truth database backup file
+            backup_file = os.path.join(PROJECT_ROOT, 'songs_db', 'songbook_backup.json')
+            try:
+                os.makedirs(os.path.dirname(backup_file), exist_ok=True)
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(songs_list, f, ensure_ascii=False, indent=2)
+                print(f"[Server] Updated source of truth database at: {backup_file}")
+            except Exception as backup_err:
+                print(f"[Server] Error updating source of truth backup: {backup_err}")
+
             # Trigger bundle_app.py directly to update songbook.html
             print("[Server] Triggering standalone HTML bundling...")
             try:
@@ -420,6 +440,16 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
                 print(f"[Server] Updated songs-data.js after deletion (Version: {new_version})")
             except Exception as e:
                 print(f"[Server] Error saving songs-data.js: {e}")
+
+            # Also update source of truth database backup file
+            backup_file = os.path.join(PROJECT_ROOT, 'songs_db', 'songbook_backup.json')
+            try:
+                os.makedirs(os.path.dirname(backup_file), exist_ok=True)
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(new_songs_list, f, ensure_ascii=False, indent=2)
+                print(f"[Server] Updated source of truth database after deletion at: {backup_file}")
+            except Exception as backup_err:
+                print(f"[Server] Error updating source of truth backup: {backup_err}")
 
             # Trigger bundle_app.py directly to update songbook.html
             print("[Server] Triggering standalone HTML bundling...")

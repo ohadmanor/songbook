@@ -89,7 +89,7 @@ const GUITAR_CHORDS = {
   'Am7':  { frets: [-1, 0, 2, 0, 1, 0], fingers: [0, 0, 2, 0, 1, 0] },
   'Bm7':  { frets: [-1, 2, 4, 2, 3, 2], fingers: [0, 1, 3, 1, 2, 1], barre: 2 },
 
-  // Diminished chords (also mapped to trailing '0' symbols)
+  // Diminished chords
   'Cdim':   { frets: [-1, 3, 4, 2, 4, -1], fingers: [0, 2, 3, 1, 4, 0] },
   'C#dim':  { frets: [-1, 4, 5, 3, 5, -1], fingers: [0, 2, 3, 1, 4, 0] },
   'Dbdim':  { frets: [-1, 4, 5, 3, 5, -1], fingers: [0, 2, 3, 1, 4, 0] },
@@ -126,8 +126,8 @@ function getChordData(chordName) {
     name = name.split('/')[0];
   }
   
-  // Intercept trailing '0', 'o', or 'O' indicating diminished chords (e.g. C0 / Co / CO -> Cdim)
-  if (name.endsWith('0') || name.endsWith('o') || name.endsWith('O')) {
+  // Intercept trailing 'o' or 'O' indicating diminished chords (e.g. Co / CO -> Cdim)
+  if (name.endsWith('o') || name.endsWith('O')) {
     name = name.slice(0, -1) + 'dim';
   }
   
@@ -332,8 +332,8 @@ function parseChordNotes(chordName) {
     name = name.split('/')[0];
   }
   
-  // Intercept trailing '0', 'o', or 'O' indicating diminished chords (e.g. C0 / Co / CO -> Cdim)
-  if (name.endsWith('0') || name.endsWith('o') || name.endsWith('O')) {
+  // Intercept trailing 'o' or 'O' indicating diminished chords (e.g. Co / CO -> Cdim)
+  if (name.endsWith('o') || name.endsWith('O')) {
     name = name.slice(0, -1) + 'dim';
   }
 
