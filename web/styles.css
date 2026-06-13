@@ -513,7 +513,6 @@ body {
 
 .song-container.rtl .chord {
   left: auto;
-  right: 0;
   direction: ltr; /* Chords are always LTR (English letters) */
 }
 
@@ -678,13 +677,16 @@ body {
 
 #song-modal .textarea-control {
   min-height: 450px;
-  font-family: 'Roboto Mono', monospace;
+  font-family: Arial, sans-serif;
   font-size: 0.95rem;
+  line-height: 1.6;
+  letter-spacing: 0;
 }
 
 #song-modal .textarea-control.rtl {
   direction: rtl;
   text-align: right;
+  unicode-bidi: plaintext;
 }
 
 /* Highlight text formatting in song sheet */

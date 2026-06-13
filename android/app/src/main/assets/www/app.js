@@ -871,7 +871,7 @@ function bindEvents(db) {
     const isRTL = el.formRtl.checked;
     const rawText = getRawTextFromEditor();
 
-    if (!title || !rawText) {
+    if (!title || !rawText.trim()) {
       showToast("Title and lyrics content are required.");
       return;
     }
@@ -2279,6 +2279,142 @@ function renderSongList() {
   });
 }
 
+function buildSongBodyFromRawText(rawText, options = {}) {
+  const resolveImageSrc = typeof options.resolveImageSrc === 'function'
+    ? options.resolveImageSrc
+    : (src) => src;
+  const isRTL = !!options.isRTL;
+
+  const blocks = window.SongParser.parseSongText(rawText || '');
+  const body = document.createElement('div');
+  body.className = 'song-body';
+
+  blocks.forEach(block => {
+    if (block.type === 'header') {
+      const h = document.createElement('div');
+      h.className = 'song-section-header';
+      h.textContent = block.text;
+      body.appendChild(h);
+    } else if (block.type === 'image') {
+      const imgDiv = document.createElement('div');
+      imgDiv.className = 'song-image-container';
+
+      const img = document.createElement('img');
+      img.src = resolveImageSrc(block.src);
+      img.className = 'song-image';
+      img.alt = 'Scan Note';
+
+      imgDiv.appendChild(img);
+      body.appendChild(imgDiv);
+    } else if (block.type === 'paragraph') {
+      const p = document.createElement('div');
+      p.className = 'song-paragraph';
+
+      block.lines.forEach(line => {
+        const lineDiv = document.createElement('div');
+
+        if (line.type === 'chord-lyric') {
+          lineDiv.className = 'chord-lyric-line';
+          let formattingState = { bold: false, highlight: false, highlightGreen: false };
+          line.segments.forEach(seg => {
+            const segSpan = document.createElement('span');
+            segSpan.className = 'chord-segment';
+
+            if (seg.chords && seg.chords.length > 0) {
+              let maxChordRightBound = 0;
+
+              seg.chords.forEach(cObj => {
+                const transposed = window.Transposer.transposeChord(cObj.chord, state.transposeOffset, state.preferFlats);
+                const cleanDisplay = cleanChordNameForDisplay(transposed);
+
+                const chordSpan = document.createElement('span');
+                chordSpan.className = 'chord';
+                chordSpan.setAttribute('data-chord', cleanDisplay);
+                chordSpan.textContent = cleanDisplay;
+
+                if (isRTL) {
+                  // For RTL: offset is measured from the right edge of the token
+                  chordSpan.style.right = `${cObj.offset / 1000}em`;
+                  chordSpan.style.left = 'auto';
+                } else {
+                  chordSpan.style.left = `${cObj.offset / 1000}em`;
+                  chordSpan.style.right = 'auto';
+                }
+
+                segSpan.appendChild(chordSpan);
+
+                // Calculate visual right-boundary of this chord in Roboto Mono units
+                const chordWidth = cleanDisplay.length * 530;
+                const rightBound = cObj.offset + chordWidth;
+                if (rightBound > maxChordRightBound) {
+                  maxChordRightBound = rightBound;
+                }
+              });
+
+              const lyricWidth = [...seg.text].reduce((sum, c) => sum + window.SongParser.getCharWidth(c), 0);
+              const overflow = maxChordRightBound - lyricWidth;
+              if (overflow > 0) {
+                const overflowEm = overflow / 1000;
+                if (isRTL) {
+                  segSpan.style.paddingLeft = `${overflowEm}em`;
+                } else {
+                  segSpan.style.paddingRight = `${overflowEm}em`;
+                }
+              }
+            }
+
+            const lyricSpan = document.createElement('span');
+            lyricSpan.className = 'lyric-text';
+            lyricSpan.innerHTML = formatSegmentText(seg.text, formattingState);
+            segSpan.appendChild(lyricSpan);
+
+            lineDiv.appendChild(segSpan);
+          });
+        } else if (line.type === 'chord-only') {
+          lineDiv.className = 'chord-only-line';
+          const rawLine = (line.rawLine || '').trimEnd();
+          const chords = window.SongParser.extractChords(rawLine);
+
+          if (chords.length === 0) {
+            lineDiv.textContent = rawLine;
+          } else {
+            let htmlResult = '';
+            let lastIdx = 0;
+
+            chords.forEach(chord => {
+              const startIdx = chord.index;
+              // Append text/spaces before this chord
+              htmlResult += escapeHTML(rawLine.substring(lastIdx, startIdx));
+
+              // Transpose and clean
+              const transposed = window.Transposer.transposeChord(chord.text, state.transposeOffset, state.preferFlats);
+              const cleanDisplay = cleanChordNameForDisplay(transposed);
+
+              // Render chord in-flow
+              htmlResult += `<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>`;
+              lastIdx = startIdx + chord.text.length;
+            });
+
+            // Append trailing characters
+            htmlResult += escapeHTML(rawLine.substring(lastIdx));
+            lineDiv.innerHTML = htmlResult;
+          }
+        } else {
+          // Plain lyrics
+          lineDiv.className = 'lyric-only-line';
+          lineDiv.innerHTML = formatLyricText(line.text);
+        }
+
+        p.appendChild(lineDiv);
+      });
+
+      body.appendChild(p);
+    }
+  });
+
+  return body;
+}
+
 // Active Song Renderer
 function renderActiveSong() {
   el.songDisplayArea.innerHTML = '';
@@ -2390,124 +2526,7 @@ function renderActiveSong() {
   container.appendChild(headerDiv);
 
   // Build parsed lyrics and chords
-  const blocks = window.SongParser.parseSongText(song.rawText);
-  const body = document.createElement('div');
-  body.className = 'song-body';
-
-  blocks.forEach(block => {
-    if (block.type === 'header') {
-      const h = document.createElement('div');
-      h.className = 'song-section-header';
-      h.textContent = block.text;
-      body.appendChild(h);
-    } else if (block.type === 'image') {
-      const imgDiv = document.createElement('div');
-      imgDiv.className = 'song-image-container';
-
-      const img = document.createElement('img');
-      img.src = block.src;
-      img.className = 'song-image';
-      img.alt = 'Scan Note';
-
-      imgDiv.appendChild(img);
-      body.appendChild(imgDiv);
-    } else if (block.type === 'paragraph') {
-      const p = document.createElement('div');
-      p.className = 'song-paragraph';
-
-      block.lines.forEach(line => {
-        const lineDiv = document.createElement('div');
-
-        if (line.type === 'chord-lyric') {
-          lineDiv.className = 'chord-lyric-line';
-          let formattingState = { bold: false, highlight: false, highlightGreen: false };
-          line.segments.forEach(seg => {
-            const segSpan = document.createElement('span');
-            segSpan.className = 'chord-segment';
-
-            if (seg.chords && seg.chords.length > 0) {
-              let maxChordRightBound = 0;
-
-              seg.chords.forEach(cObj => {
-                const transposed = window.Transposer.transposeChord(cObj.chord, state.transposeOffset, state.preferFlats);
-                const cleanDisplay = cleanChordNameForDisplay(transposed);
-
-                const chordSpan = document.createElement('span');
-                chordSpan.className = 'chord';
-                chordSpan.setAttribute('data-chord', cleanDisplay);
-                chordSpan.textContent = cleanDisplay;
-
-                // Position chord relative to segment left boundary
-                chordSpan.style.left = `${cObj.offset / 1000}em`;
-                chordSpan.style.right = 'auto';
-
-                segSpan.appendChild(chordSpan);
-
-                // Calculate visual right-boundary of this chord in Roboto Mono units
-                const chordWidth = cleanDisplay.length * 530;
-                const rightBound = cObj.offset + chordWidth;
-                if (rightBound > maxChordRightBound) {
-                  maxChordRightBound = rightBound;
-                }
-              });
-
-              const lyricWidth = [...seg.text].reduce((sum, c) => sum + window.SongParser.getCharWidth(c), 0);
-              const overflow = maxChordRightBound - lyricWidth;
-              if (overflow > 0) {
-                // Pad the right side to prevent overlap with the adjacent segment to the right (visually)
-                const overflowEm = overflow / 1000;
-                segSpan.style.paddingRight = `${overflowEm}em`;
-              }
-            }
-
-            const lyricSpan = document.createElement('span');
-            lyricSpan.className = 'lyric-text';
-            lyricSpan.innerHTML = formatSegmentText(seg.text, formattingState);
-            segSpan.appendChild(lyricSpan);
-
-            lineDiv.appendChild(segSpan);
-          });
-        } else if (line.type === 'chord-only') {
-          lineDiv.className = 'chord-only-line';
-          const rawLine = (line.rawLine || '').trimEnd();
-          const chords = window.SongParser.extractChords(rawLine);
-
-          if (chords.length === 0) {
-            lineDiv.textContent = rawLine;
-          } else {
-            let htmlResult = '';
-            let lastIdx = 0;
-
-            chords.forEach(chord => {
-              const startIdx = chord.index;
-              // Append text/spaces before this chord
-              htmlResult += escapeHTML(rawLine.substring(lastIdx, startIdx));
-
-              // Transpose and clean
-              const transposed = window.Transposer.transposeChord(chord.text, state.transposeOffset, state.preferFlats);
-              const cleanDisplay = cleanChordNameForDisplay(transposed);
-
-              // Render chord in-flow
-              htmlResult += `<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>`;
-              lastIdx = startIdx + chord.text.length;
-            });
-
-            // Append trailing characters
-            htmlResult += escapeHTML(rawLine.substring(lastIdx));
-            lineDiv.innerHTML = htmlResult;
-          }
-        } else {
-          // Plain lyrics
-          lineDiv.className = 'lyric-only-line';
-          lineDiv.innerHTML = formatLyricText(line.text);
-        }
-
-        p.appendChild(lineDiv);
-      });
-
-      body.appendChild(p);
-    }
-  });
+  const body = buildSongBodyFromRawText(song.rawText, { isRTL: song.isRTL });
 
   container.appendChild(body);
   el.songDisplayArea.appendChild(container);
@@ -2826,7 +2845,7 @@ function getRawTextFromEditor() {
       return fullMatch;
     });
   }
-  return text.trim();
+  return text;
 }
 
 // Helper to insert image token at cursor position

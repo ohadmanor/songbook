@@ -182,26 +182,33 @@ function alignChordsAndLyrics(chordLine, lyricLine) {
   
   const chords = extractChords(chordLine);
   const mappedChords = chords.map(chord => {
-    const chordOffset = chordOffsets[chord.index] * scale;
-    
-    // Adjust offset for RTL right-alignment (scaling chordWidth correctly)
-    const chordOffsetAdjusted = isRTL ? (chordOffset + (lyricWidth - chordWidth * scale)) : chordOffset;
+    // For matching with the lyric character, we use the chord's LEFT edge
+    const chordLeftOffset = chordOffsets[chord.index] * scale;
+    const chordLeftOffsetAdjusted = isRTL ? (chordWidth * scale - chordLeftOffset) : chordLeftOffset;
     
     let minDiff = Infinity;
     let closestIdx = 0;
     for (let j = 0; j < lyricOffsets.length; j++) {
-      const targetOffset = isRTL ? (lyricWidth - lyricOffsets[j]) : lyricOffsets[j];
-      const diff = Math.abs(targetOffset - chordOffsetAdjusted);
+      const targetOffset = lyricOffsets[j];
+      const diff = Math.abs(targetOffset - chordLeftOffsetAdjusted);
       if (diff < minDiff) {
         minDiff = diff;
         closestIdx = j;
       }
     }
     
+    // For the actual positioning, we use the edge that CSS positions:
+    // In LTR: CSS uses 'left', so we output the LEFT edge.
+    // In RTL: CSS uses 'right', so we output the RIGHT edge.
+    const chordRightOffset = chordOffsets[chord.index + chord.text.length] * scale;
+    const targetOffset = isRTL ? (chordWidth * scale - chordRightOffset) : chordLeftOffset;
+    const chordWidthScaled = (chordOffsets[chord.index + chord.text.length] - chordOffsets[chord.index]) * scale;
+    
     return {
       text: chord.text,
       index: Math.min(lyricLen - 1, closestIdx),
-      targetOffset: chordOffsetAdjusted
+      targetOffset: targetOffset,
+      width: chordWidthScaled
     };
   });
   
@@ -209,13 +216,22 @@ function alignChordsAndLyrics(chordLine, lyricLine) {
   const outputSegments = tokens.map(token => {
     const tokenChords = [];
     const tokenWidth = lyricOffsets[token.end] - lyricOffsets[token.start];
-    const tokenStartOffset = isRTL ? (lyricWidth - lyricOffsets[token.end]) : lyricOffsets[token.start];
+    const tokenStartOffset = lyricOffsets[token.start];
     
     mappedChords.forEach(mc => {
       if (mc.index >= token.start && mc.index < token.end) {
         let offsetInToken = mc.targetOffset - tokenStartOffset;
-        if (offsetInToken < 0) offsetInToken = 0;
-        if (offsetInToken > tokenWidth) offsetInToken = tokenWidth;
+        
+        if (isRTL) {
+          const chordWidthScaled = mc.width;
+          const minOffset = -chordWidthScaled;
+          const maxOffset = tokenWidth - chordWidthScaled;
+          if (offsetInToken < minOffset) offsetInToken = minOffset;
+          if (offsetInToken > maxOffset) offsetInToken = maxOffset;
+        } else {
+          if (offsetInToken < 0) offsetInToken = 0;
+          if (offsetInToken > tokenWidth) offsetInToken = tokenWidth;
+        }
         
         tokenChords.push({
           chord: mc.text,
