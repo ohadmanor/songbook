@@ -122,7 +122,10 @@ The output file [songbook.html](file:///c:/Develop/Github/songbook/outputs/songb
 
 ## 🆕 Release History & Changelog
 
-### Version 1.2.2 (Current)
+### Version 1.2.3 (Current)
+* **HTML and APK Production Rebuild**: Bundled standalone HTML and built native Android wrapper APK.
+
+### Version 1.2.2
 * **Smooth Sub-Pixel Autoscrolling**: Refactored the autoscroll engine to use sub-pixel increments, providing a buttery-smooth experience.
 * **10-Step Exponential Autoscroll Speed**: Replaced the linear slider with a 10-level exponential range selector, allowing fine control over slow speeds and rapid pacing.
 * **Autoscroll Manual Sync**: Standardized scroll-syncing so that if a musician manually scrolls during play, autoscrolling seamlessly resumes without resetting the speed or causing stutter.
