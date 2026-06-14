@@ -1716,29 +1716,12 @@ function bindEvents(db) {
             return;
           }
 
-          // We are inside the active setlist editor, so we have state.activeSetlistId
-          const activeSetlist = state.setlists.find(s => s.id === state.activeSetlistId);
-          const activeName = activeSetlist ? activeSetlist.name : 'current setlist';
+          // Check if we are actively viewing/editing a setlist in the sidebar
+          const isEditing = state.activeTab === 'setlists' && state.activeSetlistId && el.setlistEditor && el.setlistEditor.style.display === 'flex';
+          const activeSetlist = isEditing ? state.setlists.find(s => s.id === state.activeSetlistId) : null;
 
-          if (confirm(`Do you want to overwrite the current setlist "${activeName}" with the imported songs? (Cancel to import as a new setlist)`)) {
-            // Overwrite current setlist
-            if (activeSetlist) {
-              activeSetlist.name = setlistItem.name;
-              activeSetlist.songs = setlistItem.songs;
-              if (db) {
-                await dbPutSetlist(db, activeSetlist);
-              }
-              showToast(`Setlist "${activeSetlist.name}" overwritten.`);
-              renderToolbarSetlistSelect();
-              renderSetlistEditor();
-              renderSidebar();
-              renderActiveSong();
-            } else {
-              showToast("No active setlist found to overwrite.");
-            }
-          } else {
-            // Import as a new setlist
-            const newSetlist = JSON.parse(JSON.stringify(setlistItem));
+          const importAsNewSetlist = async (item) => {
+            const newSetlist = JSON.parse(JSON.stringify(item));
             newSetlist.id = 'setlist_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
 
             // Check for name collision
@@ -1754,10 +1737,34 @@ function bindEvents(db) {
             }
             state.activeSetlistId = newSetlist.id;
             state.activeSetlistSongIndex = null;
+            state.activeTab = 'setlists';
             showToast(`Imported "${newSetlist.name}" as new setlist.`);
             renderToolbarSetlistSelect();
             renderSidebar();
             renderActiveSong();
+          };
+
+          if (activeSetlist) {
+            if (confirm(`Do you want to overwrite the current setlist "${activeSetlist.name}" with the imported songs? (Cancel to import as a new setlist)`)) {
+              // Overwrite current setlist
+              activeSetlist.name = setlistItem.name;
+              activeSetlist.songs = setlistItem.songs;
+              if (db) {
+                await dbPutSetlist(db, activeSetlist);
+              }
+              showToast(`Setlist "${activeSetlist.name}" overwritten.`);
+              state.activeTab = 'setlists';
+              renderToolbarSetlistSelect();
+              renderSetlistEditor();
+              renderSidebar();
+              renderActiveSong();
+            } else {
+              // Import as a new setlist
+              await importAsNewSetlist(setlistItem);
+            }
+          } else {
+            // Import directly as a new setlist without confirmation
+            await importAsNewSetlist(setlistItem);
           }
         } catch (err) {
           console.error(err);
