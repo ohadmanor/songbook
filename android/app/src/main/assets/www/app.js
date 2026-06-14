@@ -409,69 +409,21 @@ function hashString(str) {
 // Initialize Application
 async function init() {
   let defaultSongs = window.defaultSongs || [];
-  let localSongs = [];
 
   try {
     db = await initDB();
 
-    // Check if we have default songs from index.html (songs-data.js)
-    let songsJsonText = JSON.stringify(defaultSongs);
-    localSongs = await dbGetAllSongs(db);
-
     // Load setlists
     state.setlists = await dbGetAllSetlists(db);
     renderToolbarSetlistSelect();
-
-    // Auto-sync logic
-    if (defaultSongs.length > 0) {
-      const newVersion = window.defaultSongsVersion || 'unknown';
-      const oldVersion = localStorage.getItem('songs_db_version');
-
-      if (newVersion !== oldVersion || localSongs.length === 0) {
-        console.log("Syncing songbook database with songs-data.js version:", newVersion);
-
-        // 1. Identify user-edited standard songs in the local DB
-        const localEditedMap = new Map(
-          localSongs.filter(s => s.modifiedByUser).map(s => [s.id, s])
-        );
-
-        // 2. Build list of default songs to sync (excluding ones user has edited)
-        const songsToPut = [];
-        for (const defaultSong of defaultSongs) {
-          if (localEditedMap.has(defaultSong.id)) {
-            continue; // Skip overwriting user edits
-          }
-          songsToPut.push(defaultSong);
-        }
-
-        if (songsToPut.length > 0) {
-          await dbPutSongs(db, songsToPut);
-        }
-
-        // 3. Remove standard songs no longer in songs-data.js (and not edited by user)
-        const fetchedMap = new Map(defaultSongs.map(s => [s.id, s]));
-        for (const localSong of localSongs) {
-          if (localSong.id.startsWith('song_') && !fetchedMap.has(localSong.id) && !localSong.modifiedByUser) {
-            await dbDeleteSong(db, localSong.id);
-          }
-        }
-
-        // Reload final songs list
-        localSongs = await dbGetAllSongs(db);
-        localStorage.setItem('songs_db_version', newVersion);
-        showToast("Synchronized songbook database.");
-      }
-    }
   } catch (error) {
-    console.error("Initialization failed, falling back to static songs list:", error);
-    showToast("Using static backup database.");
+    console.error("Initialization failed, setlists unavailable:", error);
     db = null; // Mark DB as unavailable
-    localSongs = defaultSongs;
     state.setlists = [];
   }
 
-  state.songs = localSongs;
-  state.filteredSongs = [...localSongs];
+  state.songs = defaultSongs;
+  state.filteredSongs = [...defaultSongs];
 
   // Sort songs alphabetically by Title
   sortSongs();
@@ -915,11 +867,9 @@ function bindEvents(db) {
     if (filename) {
       song.filename = filename;
     }
-    if (id.startsWith('song_')) {
-      song.modifiedByUser = true;
-    }
 
     // Attempt to sync edits back to host disk using local server API
+    let serverSynced = false;
     try {
       const response = await fetch('/api/save-song', {
         method: 'POST',
@@ -928,6 +878,7 @@ function bindEvents(db) {
       });
       if (response.ok) {
         console.log("Edits successfully synced to local disk.");
+        serverSynced = true;
       } else {
         console.warn("Failed to sync edits to local disk, status:", response.status);
       }
@@ -936,12 +887,6 @@ function bindEvents(db) {
     }
 
     try {
-      if (db) {
-        await dbPutSong(db, song);
-      } else {
-        console.warn("Offline database: saving changes in memory only.");
-      }
-
       // Update local state
       const existingIdx = state.songs.findIndex(s => s.id === id);
       if (existingIdx >= 0) {
@@ -951,6 +896,17 @@ function bindEvents(db) {
         state.songs.push(song);
         showToast("Song added successfully.");
       }
+
+      // Sync window.defaultSongs
+      const defaultSongs = window.defaultSongs || [];
+      const defaultIdx = defaultSongs.findIndex(s => s.id === id);
+      if (defaultIdx >= 0) {
+        defaultSongs[defaultIdx] = song;
+      } else {
+        defaultSongs.push(song);
+      }
+      window.defaultSongs = defaultSongs;
+
       updateSongCount();
 
       // Sync UI
@@ -962,6 +918,10 @@ function bindEvents(db) {
       closeSongModal();
       renderSongList();
       renderActiveSong();
+
+      if (!serverSynced) {
+        triggerHTMLDownload(state.songs);
+      }
     } catch (e) {
       console.error(e);
       showToast("Failed to save song.");
@@ -975,6 +935,7 @@ function bindEvents(db) {
 
     if (confirm("Are you sure you want to delete this song permanently?")) {
       // Attempt to sync delete back to host disk using local server API
+      let serverSynced = false;
       try {
         const response = await fetch('/api/delete-song', {
           method: 'POST',
@@ -983,6 +944,7 @@ function bindEvents(db) {
         });
         if (response.ok) {
           console.log("Delete successfully synced to local disk.");
+          serverSynced = true;
         } else {
           console.warn("Failed to sync delete to local disk, status:", response.status);
         }
@@ -991,14 +953,10 @@ function bindEvents(db) {
       }
 
       try {
-        if (db) {
-          await dbDeleteSong(db, id);
-        } else {
-          console.warn("Offline database: deleting from memory only.");
-        }
         showToast("Song deleted.");
 
         state.songs = state.songs.filter(s => s.id !== id);
+        window.defaultSongs = (window.defaultSongs || []).filter(s => s.id !== id);
         state.filteredSongs = [...state.songs];
         updateSongCount();
 
@@ -1013,6 +971,10 @@ function bindEvents(db) {
 
         renderSongList();
         renderActiveSong();
+
+        if (!serverSynced) {
+          triggerHTMLDownload(state.songs);
+        }
       } catch (e) {
         console.error(e);
         showToast("Failed to delete song.");
@@ -1278,15 +1240,6 @@ function bindEvents(db) {
         try {
           const response = await fetch('/api/undo-restore', { method: 'POST' });
           if (response.ok) {
-            try {
-              window.localStorage.removeItem('songs_db_version');
-              if (db) {
-                const transaction = db.transaction(['songs'], 'readwrite');
-                transaction.objectStore('songs').clear();
-              }
-            } catch (e) {
-              console.error(e);
-            }
             showToast("Database reverted successfully! Reloading...");
             setTimeout(() => {
               window.location.reload();
@@ -1294,51 +1247,27 @@ function bindEvents(db) {
             return;
           }
         } catch (err) {
-          console.log("Server undo unavailable. Attempting local IndexedDB undo.", err);
+          console.log("Server undo unavailable. Attempting local memory undo.", err);
         }
         
-        // Local IndexedDB undo fallback
-        if (db) {
-          try {
-            const readTransaction = db.transaction(['pre_restore'], 'readonly');
-            const preStore = readTransaction.objectStore('pre_restore');
-            const songsToRevert = await new Promise((res, rej) => {
-              const req = preStore.getAll();
-              req.onsuccess = () => res(req.result);
-              req.onerror = () => rej(req.error);
-            });
-            
-            if (songsToRevert && songsToRevert.length > 0) {
-              const writeTransaction = db.transaction(['songs', 'pre_restore'], 'readwrite');
-              const songsStore = writeTransaction.objectStore('songs');
-              const preStoreWrite = writeTransaction.objectStore('pre_restore');
-              
-              songsStore.clear();
-              songsToRevert.forEach(s => songsStore.put(s));
-              preStoreWrite.clear();
-              
-              writeTransaction.oncomplete = () => {
-                const currentVersion = window.defaultSongsVersion || 'unknown';
-                localStorage.setItem('songs_db_version', currentVersion);
-                showToast("Database reverted locally! Reloading...");
-                setTimeout(() => {
-                  window.location.reload();
-                }, 1500);
-              };
-              
-              writeTransaction.onerror = (e) => {
-                console.error("Local undo transaction failed:", e);
-                showToast("Revert failed: database error.");
-              };
-            } else {
-              showToast("No local undo backup found.");
-            }
-          } catch (dbErr) {
-            console.error("Failed to execute local undo restore:", dbErr);
-            showToast("Revert failed: " + dbErr.message);
+        // Local memory undo fallback
+        if (state.preRestoreSongs) {
+          state.songs = [...state.preRestoreSongs];
+          window.defaultSongs = [...state.preRestoreSongs];
+          state.filteredSongs = [...state.songs];
+          sortSongs();
+          if (state.songs.length > 0) {
+            state.currentSongId = state.songs[0].id;
+            localStorage.setItem('lastViewedSongId', state.currentSongId);
+          } else {
+            state.currentSongId = null;
           }
+          renderSongList();
+          renderActiveSong();
+          showToast("Database reverted locally! Triggering download...");
+          triggerHTMLDownload(state.songs);
         } else {
-          showToast("Revert failed: database unavailable.");
+          showToast("No pre-restore backup available in this session.");
         }
       }
     });
@@ -1430,6 +1359,10 @@ function bindEvents(db) {
         return;
       }
 
+      // Save pre-restore state for memory undo
+      state.preRestoreSongs = [...state.songs];
+
+      let serverSynced = false;
       try {
         showToast("Restoring selected database changes...");
         const response = await fetch('/api/restore-backup', {
@@ -1439,48 +1372,11 @@ function bindEvents(db) {
         });
 
         if (response.ok) {
-          let newVersion = 'unknown';
-          try {
-            const data = await response.json();
-            if (data && data.version) {
-              newVersion = data.version;
-            }
-          } catch (jsonErr) {
-            console.warn("Failed to parse server version from restore response:", jsonErr);
-          }
-
-          if (db) {
-            try {
-              const transaction = db.transaction(['songs'], 'readwrite');
-              const store = transaction.objectStore('songs');
-              store.clear();
-              songsToRestore.forEach(song => store.put(song));
-              
-              transaction.oncomplete = () => {
-                localStorage.setItem('songs_db_version', newVersion);
-                showToast("Database restored successfully! Reloading...");
-                setTimeout(() => {
-                  window.location.reload();
-                }, 1500);
-              };
-              
-              transaction.onerror = (e) => {
-                console.error("Failed to write restored songs to IndexedDB:", e);
-                localStorage.setItem('songs_db_version', newVersion);
-                window.location.reload();
-              };
-            } catch (dbErr) {
-              console.error("Error writing restored songs to IndexedDB:", dbErr);
-              localStorage.setItem('songs_db_version', newVersion);
-              window.location.reload();
-            }
-          } else {
-            localStorage.setItem('songs_db_version', newVersion);
-            showToast("Database restored successfully! Reloading...");
-            setTimeout(() => {
-              window.location.reload();
-            }, 1500);
-          }
+          serverSynced = true;
+          showToast("Database restored successfully! Reloading...");
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
         } else {
           const errText = await response.text();
           console.error("Restore failed:", errText);
@@ -1488,40 +1384,24 @@ function bindEvents(db) {
         }
       } catch (err) {
         console.warn("Network or server error during restore, attempting local browser restore fallback:", err);
-        if (db) {
-          try {
-            const transaction = db.transaction(['songs', 'pre_restore'], 'readwrite');
-            const store = transaction.objectStore('songs');
-            const preStore = transaction.objectStore('pre_restore');
-            
-            // Backup current songs to pre_restore
-            preStore.clear();
-            state.songs.forEach(song => preStore.put(song));
-            
-            // Clear and restore
-            store.clear();
-            songsToRestore.forEach(song => store.put(song));
-            
-            transaction.oncomplete = () => {
-              const currentVersion = window.defaultSongsVersion || 'unknown';
-              localStorage.setItem('songs_db_version', currentVersion);
-              showToast("Database restored locally in browser successfully! Reloading...");
-              setTimeout(() => {
-                window.location.reload();
-              }, 1500);
-            };
+      }
 
-            transaction.onerror = (e) => {
-              console.error("Local IndexedDB restore failed:", e);
-              showToast("Failed to restore locally: database error.");
-            };
-          } catch (dbErr) {
-            console.error("Failed to execute local DB restore:", dbErr);
-            showToast("Failed to restore locally: " + dbErr.message);
-          }
+      if (!serverSynced) {
+        state.songs = songsToRestore;
+        window.defaultSongs = [...songsToRestore];
+        state.filteredSongs = [...songsToRestore];
+        sortSongs();
+        if (state.songs.length > 0) {
+          state.currentSongId = state.songs[0].id;
+          localStorage.setItem('lastViewedSongId', state.currentSongId);
         } else {
-          showToast("Error connecting to server and local database is unavailable.");
+          state.currentSongId = null;
         }
+        renderSongList();
+        renderActiveSong();
+        closeRestoreModal();
+        showToast("Database restored! Download of updated HTML triggered.");
+        triggerHTMLDownload(songsToRestore);
       }
     });
   }
@@ -3425,6 +3305,66 @@ function toggleFullscreen(enable) {
   } else {
     appContainer.classList.remove('fullscreen');
     if (el.fullscreenControls) el.fullscreenControls.style.display = 'none';
+  }
+}
+
+function downloadTextFile(filename, content) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const downloadAnchor = document.createElement('a');
+  downloadAnchor.setAttribute("href", url);
+  downloadAnchor.setAttribute("download", filename);
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function triggerHTMLDownload(updatedSongs) {
+  // Try to find the inlined script tag for defaultSongs
+  const scripts = Array.from(document.querySelectorAll('script'));
+  const songsScript = scripts.find(s => s.textContent && s.textContent.includes('window.defaultSongs'));
+  
+  if (songsScript) {
+    // We are in standalone bundled HTML mode
+    // Clone document element to avoid changing live DOM view permanently
+    const clonedDoc = document.documentElement.cloneNode(true);
+    
+    // Find the songs script tag in the clone and update it
+    const clonedScripts = Array.from(clonedDoc.querySelectorAll('script'));
+    const clonedSongsScript = clonedScripts.find(s => s.textContent && s.textContent.includes('window.defaultSongs'));
+    if (clonedSongsScript) {
+      const newVersion = new Date().toISOString();
+      clonedSongsScript.textContent = `window.defaultSongsVersion = '${newVersion}';\nwindow.defaultSongs = ${JSON.stringify(updatedSongs, null, 2)};`;
+    }
+    
+    // Clean up any dynamic UI states in the clone so we don't download a dirty DOM
+    const activeModals = clonedDoc.querySelectorAll('.modal-overlay.active');
+    activeModals.forEach(m => m.classList.remove('active'));
+    
+    const activeSidebars = clonedDoc.querySelectorAll('.sidebar.active');
+    activeSidebars.forEach(s => s.classList.remove('active'));
+    
+    const songDisplay = clonedDoc.querySelector('#song-display-area');
+    if (songDisplay) songDisplay.innerHTML = '';
+    
+    // Grab the current filename from path or default to songbook.html
+    let filename = 'songbook.html';
+    const pathParts = window.location.pathname.split('/');
+    const lastPart = pathParts[pathParts.length - 1];
+    if (lastPart && lastPart.endsWith('.html')) {
+      filename = lastPart;
+    }
+    
+    const fullHtml = "<!DOCTYPE html>\n" + clonedDoc.outerHTML;
+    downloadTextFile(filename, fullHtml);
+    showToast(`Saved. Downloaded updated ${filename}`);
+  } else {
+    // We are running index.html directly with external songs-data.js script
+    const newVersion = new Date().toISOString();
+    const jsContent = `window.defaultSongsVersion = '${newVersion}';\nwindow.defaultSongs = ${JSON.stringify(updatedSongs, null, 2)};`;
+    downloadTextFile('songs-data.js', jsContent);
+    showToast("Saved. Downloaded updated songs-data.js");
   }
 }
 
