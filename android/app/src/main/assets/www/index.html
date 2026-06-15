@@ -44,7 +44,7 @@
       <nav class="song-list-container" id="setlist-list" style="display: none; padding: 0.5rem 1rem;"></nav>
       
       <!-- Active Setlist Editor -->
-      <div id="setlist-editor" style="display: none; flex-direction: column; flex: 1; overflow: hidden; padding: 1rem; gap: 0.8rem;">
+      <div id="setlist-editor" style="display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; padding: 1rem; gap: 0.8rem;">
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.3rem;">
           <button class="btn" id="setlist-back-btn" style="flex: none; padding: 4px 6px; font-size: 0.75rem;">← Back</button>
           <input type="text" id="setlist-name-input" class="form-control" style="font-weight: bold; font-size: 0.9rem; flex: 1; padding: 4px 6px;" placeholder="Setlist Name">
@@ -65,7 +65,7 @@
         </div>
         
         <!-- Setlist songs list -->
-        <div id="setlist-songs-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem;"></div>
+        <div id="setlist-songs-container" style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem;"></div>
       </div>
       
       <!-- Sidebar Action Footers -->
