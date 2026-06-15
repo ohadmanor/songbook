@@ -13,7 +13,7 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.example.songbook"
-        minSdk = 24
+        minSdk = 23
         targetSdk = 36
         versionCode = 13
         versionName = "1.2.3"
@@ -112,6 +112,25 @@ abstract class BundleHtmlTask : DefaultTask() {
             val exitCode = process.waitFor()
             if (exitCode != 0) {
                 logger.warn("Warning: bundle_app.py exited with code $exitCode")
+            }
+            
+            // Now run sync_android.py to ensure the updated web/ directory is synced into Android assets
+            val syncProcess = ProcessBuilder("python", "scripts/sync_android.py")
+                .directory(rootDir)
+                .redirectErrorStream(true)
+                .start()
+                
+            syncProcess.inputStream.bufferedReader().use { reader ->
+                var line: String? = reader.readLine()
+                while (line != null) {
+                    println(line)
+                    line = reader.readLine()
+                }
+            }
+            
+            val syncExitCode = syncProcess.waitFor()
+            if (syncExitCode != 0) {
+                logger.warn("Warning: sync_android.py exited with code $syncExitCode")
             }
         } catch (e: Exception) {
             logger.warn("Warning: Failed to execute bundle_app.py. Standalone HTML might be outdated. Error: ${e.message}")

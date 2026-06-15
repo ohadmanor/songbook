@@ -433,14 +433,37 @@ body {
   margin-bottom: 0.4rem;
 }
 
+.chord-lyric-pair {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.8rem;
+  overflow-wrap: break-word;
+}
+
+.chord-lyric-pair .chord-only-line,
+.chord-lyric-pair .lyric-only-line {
+  margin-bottom: 0;
+  line-height: 1.4;
+  font-family: Arial, sans-serif;
+  white-space: pre-wrap;
+  unicode-bidi: plaintext;
+}
+
+.chord-lyric-pair .chord {
+  font-family: Arial, sans-serif;
+  font-size: 1em;
+  padding: 0;
+  background-color: transparent;
+}
+
 .chord-only-line {
   display: block;
   white-space: pre;
   font-family: 'Roboto Mono', monospace;
   line-height: 1.8;
   margin-bottom: 0.4rem;
-  direction: ltr;
   text-align: left;
+  unicode-bidi: plaintext;
 }
 
 .chord-only-line .chord {

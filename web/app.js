@@ -2201,65 +2201,43 @@ function buildSongBodyFromRawText(rawText, options = {}) {
         const lineDiv = document.createElement('div');
 
         if (line.type === 'chord-lyric') {
-          lineDiv.className = 'chord-lyric-line';
-          let formattingState = { bold: false, highlight: false, highlightGreen: false };
-          line.segments.forEach(seg => {
-            const segSpan = document.createElement('span');
-            segSpan.className = 'chord-segment';
+          lineDiv.className = 'chord-lyric-pair';
+          
+          const chordDiv = document.createElement('div');
+          chordDiv.className = 'chord-only-line';
+          const rawChordLine = (line.rawChordLine || '');
+          const chords = window.SongParser.extractChords(rawChordLine);
 
-            if (seg.chords && seg.chords.length > 0) {
-              let maxChordRightBound = 0;
+          if (chords.length === 0) {
+            chordDiv.textContent = rawChordLine;
+          } else {
+            let htmlResult = '';
+            let lastIdx = 0;
 
-              seg.chords.forEach(cObj => {
-                const transposed = window.Transposer.transposeChord(cObj.chord, state.transposeOffset, state.preferFlats);
-                const cleanDisplay = cleanChordNameForDisplay(transposed);
+            chords.forEach(chord => {
+              const startIdx = chord.index;
+              htmlResult += escapeHTML(rawChordLine.substring(lastIdx, startIdx));
 
-                const chordSpan = document.createElement('span');
-                chordSpan.className = 'chord';
-                chordSpan.setAttribute('data-chord', cleanDisplay);
-                chordSpan.textContent = cleanDisplay;
+              const transposed = window.Transposer.transposeChord(chord.text, state.transposeOffset, state.preferFlats);
+              const cleanDisplay = cleanChordNameForDisplay(transposed);
 
-                if (isRTL) {
-                  // For RTL: offset is measured from the right edge of the token
-                  chordSpan.style.right = `${cObj.offset / 1000}em`;
-                  chordSpan.style.left = 'auto';
-                } else {
-                  chordSpan.style.left = `${cObj.offset / 1000}em`;
-                  chordSpan.style.right = 'auto';
-                }
+              htmlResult += `<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>`;
+              lastIdx = startIdx + chord.text.length;
+            });
 
-                segSpan.appendChild(chordSpan);
+            htmlResult += escapeHTML(rawChordLine.substring(lastIdx));
+            chordDiv.innerHTML = htmlResult;
+          }
 
-                // Calculate visual right-boundary of this chord in Roboto Mono units
-                const chordWidth = cleanDisplay.length * 530;
-                const rightBound = cObj.offset + chordWidth;
-                if (rightBound > maxChordRightBound) {
-                  maxChordRightBound = rightBound;
-                }
-              });
+          const lyricDiv = document.createElement('div');
+          lyricDiv.className = 'lyric-only-line';
+          lyricDiv.innerHTML = formatLyricText(line.rawLyricLine || '');
 
-              const lyricWidth = [...seg.text].reduce((sum, c) => sum + window.SongParser.getCharWidth(c), 0);
-              const overflow = maxChordRightBound - lyricWidth;
-              if (overflow > 0) {
-                const overflowEm = overflow / 1000;
-                if (isRTL) {
-                  segSpan.style.paddingLeft = `${overflowEm}em`;
-                } else {
-                  segSpan.style.paddingRight = `${overflowEm}em`;
-                }
-              }
-            }
-
-            const lyricSpan = document.createElement('span');
-            lyricSpan.className = 'lyric-text';
-            lyricSpan.innerHTML = formatSegmentText(seg.text, formattingState);
-            segSpan.appendChild(lyricSpan);
-
-            lineDiv.appendChild(segSpan);
-          });
+          lineDiv.appendChild(chordDiv);
+          lineDiv.appendChild(lyricDiv);
         } else if (line.type === 'chord-only') {
           lineDiv.className = 'chord-only-line';
-          const rawLine = (line.rawLine || '').trimEnd();
+          const rawLine = (line.rawLine || '');
           const chords = window.SongParser.extractChords(rawLine);
 
           if (chords.length === 0) {

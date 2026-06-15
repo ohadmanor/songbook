@@ -9,15 +9,34 @@ stand-alone HTML file: 'songbook.html' in the workspace root.
 import os
 import re
 import base64
+import json
+import datetime
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
     
     web_dir = os.path.join(project_root, 'web')
+    db_file = os.path.join(project_root, 'songs_db', 'songbook_backup.json')
     outputs_dir = os.path.join(project_root, 'outputs')
     os.makedirs(outputs_dir, exist_ok=True)
     output_html_file = os.path.join(outputs_dir, 'songbook.html')
+    
+    # 0. Generate songs-data.js from songbook_backup.json
+    if os.path.exists(db_file):
+        try:
+            with open(db_file, 'r', encoding='utf-8') as f:
+                songs_json = f.read()
+            timestamp = datetime.datetime.now().isoformat()
+            js_content = f"window.defaultSongsVersion = '{timestamp}';\nwindow.defaultSongs = {songs_json};\n"
+            songs_data_path = os.path.join(web_dir, 'songs-data.js')
+            with open(songs_data_path, 'w', encoding='utf-8') as f:
+                f.write(js_content)
+            print("Generated web/songs-data.js from songs_db/songbook_backup.json")
+        except Exception as e:
+            print(f"Error generating songs-data.js: {e}")
+    else:
+        print(f"Warning: {db_file} not found, skipping songs-data.js generation")
     
     # 1. Read index.html
     index_path = os.path.join(web_dir, 'index.html')
@@ -64,7 +83,6 @@ def main():
     html = inline_script(html, 'app.js')
     
     # Update defaultSongsVersion to a fresh timestamp for the bundle to force browser cache sync
-    import datetime
     timestamp = datetime.datetime.now().isoformat()
     html = re.sub(
         r"window\.defaultSongsVersion\s*=\s*['\"][^'\"]*['\"];",
