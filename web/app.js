@@ -3,8 +3,29 @@
  * Main client-side logic for the ChordBook application.
  */
 
+// Firebase Configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDaEId8GIcA958I3EYRTomdfFDkTyXU-Co",
+  authDomain: "songbookchordsandlyrics.firebaseapp.com",
+  projectId: "songbookchordsandlyrics",
+  storageBucket: "songbookchordsandlyrics.firebasestorage.app",
+  messagingSenderId: "821402914518",
+  appId: "1:821402914518:web:9344781fdb4d8d2a0dc377",
+  measurementId: "G-ZF1D9MSS3H"
+};
+
+let dbFirestore = null;
+if (typeof firebase !== 'undefined') {
+  firebase.initializeApp(firebaseConfig);
+  dbFirestore = firebase.firestore();
+  dbFirestore.enablePersistence().catch((err) => {
+    console.warn("Firestore persistence error:", err);
+  });
+}
+
 // Application State
 let state = {
+  currentUser: null,
   songs: [],
   filteredSongs: [],
   currentSongId: null,
@@ -214,34 +235,36 @@ function dbGetAllSetlists(dbInstance) {
   });
 }
 
-function dbPutSetlist(dbInstance, setlist) {
-  return new Promise((resolve, reject) => {
-    if (!dbInstance) {
-      resolve();
-      return;
-    }
-    const transaction = dbInstance.transaction(SETLIST_STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(SETLIST_STORE_NAME);
-    const request = store.put(setlist);
-
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+async function dbPutSetlist(dbInstance, setlist) {
+  if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
+    if (setlist.ownerId === undefined) setlist.ownerId = state.currentUser.uid;
+    if (setlist.isShared === undefined) setlist.isShared = setlistShareCheckbox ? setlistShareCheckbox.checked : false;
+    await dbFirestore.collection('setlists').doc(setlist.id).set(setlist);
+  } else {
+    return new Promise((resolve, reject) => {
+      if (!dbInstance) { resolve(); return; }
+      const transaction = dbInstance.transaction(SETLIST_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(SETLIST_STORE_NAME);
+      const request = store.put(setlist);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
 
-function dbDeleteSetlist(dbInstance, id) {
-  return new Promise((resolve, reject) => {
-    if (!dbInstance) {
-      resolve();
-      return;
-    }
-    const transaction = dbInstance.transaction(SETLIST_STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(SETLIST_STORE_NAME);
-    const request = store.delete(id);
-
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+async function dbDeleteSetlist(dbInstance, id) {
+  if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
+    await dbFirestore.collection('setlists').doc(id).delete();
+  } else {
+    return new Promise((resolve, reject) => {
+      if (!dbInstance) { resolve(); return; }
+      const transaction = dbInstance.transaction(SETLIST_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(SETLIST_STORE_NAME);
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
 
 function dbGetAllSongs(db) {
@@ -406,46 +429,137 @@ function hashString(str) {
   return hash.toString();
 }
 
+// DOM elements for Auth
+const authContainer = document.querySelector('.auth-container');
+const loginBtn = document.getElementById('login-btn');
+const logoutBtn = document.getElementById('logout-btn');
+const userInfo = document.getElementById('user-info');
+const userName = document.getElementById('user-name');
+const userAvatar = document.getElementById('user-avatar');
+const shareSongGroup = document.getElementById('share-song-group');
+const formShare = document.getElementById('form-share');
+const shareSetlistGroup = document.getElementById('share-setlist-group');
+const setlistShareCheckbox = document.getElementById('setlist-share-checkbox');
+
 // Initialize Application
 async function init() {
-  let defaultSongs = window.defaultSongs || [];
-
+  loadSettings();
+  
   try {
     db = await initDB();
-
-    // Load setlists
-    state.setlists = await dbGetAllSetlists(db);
-    renderToolbarSetlistSelect();
   } catch (error) {
-    console.error("Initialization failed, setlists unavailable:", error);
-    db = null; // Mark DB as unavailable
-    state.setlists = [];
+    console.error("Local IndexedDB failed:", error);
+    db = null;
   }
 
-  state.songs = defaultSongs;
-  state.filteredSongs = [...defaultSongs];
-
-  // Sort songs alphabetically by Title
-  sortSongs();
-
-  // Setup initial routing/view
-  if (state.songs.length > 0) {
-    // Restore last viewed song or first song
-    const lastViewedId = localStorage.getItem('lastViewedSongId');
-    const songExists = state.songs.some(s => s.id === lastViewedId);
-    state.currentSongId = songExists ? lastViewedId : state.songs[0].id;
-  }
-
-  // Load Settings
-  loadSettings();
-
-  // Event bindings
   bindEvents(db);
 
-  // Initial Render
-  renderSidebar();
-  renderSongList();
-  renderActiveSong();
+  if (typeof firebase !== 'undefined') {
+    firebase.auth().onAuthStateChanged((user) => {
+      if (user) {
+        state.currentUser = user;
+        if (!user.isAnonymous) {
+          userInfo.style.display = 'flex';
+          userName.textContent = user.displayName || 'User';
+          userAvatar.src = user.photoURL || '';
+          loginBtn.style.display = 'none';
+          logoutBtn.style.display = 'block';
+          if (el.newSongBtn) el.newSongBtn.style.display = 'block';
+          if (el.newSetlistBtn) el.newSetlistBtn.style.display = 'block';
+        } else {
+          // Guest
+          userInfo.style.display = 'none';
+          loginBtn.style.display = 'block';
+          logoutBtn.style.display = 'none';
+          if (el.newSongBtn) el.newSongBtn.style.display = 'none'; // Guest can't add song
+        }
+        startRealtimeSync();
+      } else {
+        firebase.auth().signInAnonymously().catch(console.error);
+      }
+    });
+
+    if (loginBtn) {
+      loginBtn.addEventListener('click', () => {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        firebase.auth().signInWithPopup(provider).catch(console.error);
+      });
+    }
+
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', () => {
+        firebase.auth().signOut();
+      });
+    }
+  } else {
+    // Fallback if no firebase
+    state.songs = window.defaultSongs || [];
+    state.filteredSongs = [...state.songs];
+    sortSongs();
+    if (state.songs.length > 0) state.currentSongId = state.songs[0].id;
+    renderSidebar();
+    renderSongList();
+    renderActiveSong();
+  }
+}
+
+let unsubscribeSongs = null;
+let unsubscribeSetlists = null;
+
+function startRealtimeSync() {
+  if (!dbFirestore || !state.currentUser) return;
+  const uid = state.currentUser.uid;
+
+  if (unsubscribeSongs) unsubscribeSongs();
+  unsubscribeSongs = dbFirestore.collection('songs').onSnapshot((snapshot) => {
+    let songs = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.isShared || data.ownerId === uid) {
+        songs.push(data);
+      }
+    });
+    
+    const defaultSongs = window.defaultSongs || [];
+    const merged = new Map();
+    defaultSongs.forEach(s => merged.set(s.id, s));
+    songs.forEach(s => merged.set(s.id, s));
+    
+    state.songs = Array.from(merged.values());
+    state.filteredSongs = [...state.songs];
+    sortSongs();
+    
+    if (!state.currentSongId && state.songs.length > 0) {
+      const lastViewedId = localStorage.getItem('lastViewedSongId');
+      const exists = state.songs.some(s => s.id === lastViewedId);
+      state.currentSongId = exists ? lastViewedId : state.songs[0].id;
+    }
+    
+    renderSongList();
+    renderActiveSong();
+  });
+
+  if (unsubscribeSetlists) unsubscribeSetlists();
+  
+  if (state.currentUser.isAnonymous) {
+    dbGetAllSetlists(db).then(setlists => {
+      state.setlists = setlists || [];
+      renderToolbarSetlistSelect();
+    });
+  } else {
+    unsubscribeSetlists = dbFirestore.collection('setlists').onSnapshot((snapshot) => {
+      let setlists = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.isShared || data.ownerId === uid) {
+          setlists.push(data);
+        }
+      });
+      state.setlists = setlists;
+      renderToolbarSetlistSelect();
+      if (typeof renderSetlistsTab === 'function') renderSetlistsTab();
+    });
+  }
 }
 
 function sortSongs() {
@@ -864,67 +978,21 @@ function bindEvents(db) {
     const filename = originalSong ? originalSong.filename : null;
 
     const song = { id, title, artist, key, isRTL, rawText };
-    if (filename) {
-      song.filename = filename;
-    }
+    if (filename) song.filename = filename;
 
-    // Attempt to sync edits back to host disk using local server API
-    let serverSynced = false;
-    try {
-      const response = await fetch('/api/save-song', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(song)
-      });
-      if (response.ok) {
-        console.log("Edits successfully synced to local disk.");
-        serverSynced = true;
-      } else {
-        console.warn("Failed to sync edits to local disk, status:", response.status);
+    if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
+      song.ownerId = originalSong ? (originalSong.ownerId || state.currentUser.uid) : state.currentUser.uid;
+      song.isShared = formShare ? formShare.checked : false;
+      try {
+        await dbFirestore.collection('songs').doc(id).set(song);
+        showToast("Song saved to cloud.");
+        closeSongModal();
+      } catch (err) {
+        console.error(err);
+        showToast("Failed to save to cloud.");
       }
-    } catch (err) {
-      console.log("Local sync server unavailable. Saving locally inside browser only.");
-    }
-
-    try {
-      // Update local state
-      const existingIdx = state.songs.findIndex(s => s.id === id);
-      if (existingIdx >= 0) {
-        state.songs[existingIdx] = song;
-        showToast("Song updated successfully.");
-      } else {
-        state.songs.push(song);
-        showToast("Song added successfully.");
-      }
-
-      // Sync window.defaultSongs
-      const defaultSongs = window.defaultSongs || [];
-      const defaultIdx = defaultSongs.findIndex(s => s.id === id);
-      if (defaultIdx >= 0) {
-        defaultSongs[defaultIdx] = song;
-      } else {
-        defaultSongs.push(song);
-      }
-      window.defaultSongs = defaultSongs;
-
-      updateSongCount();
-
-      // Sync UI
-      state.filteredSongs = [...state.songs];
-      sortSongs();
-      state.currentSongId = id;
-      localStorage.setItem('lastViewedSongId', id);
-
-      closeSongModal();
-      renderSongList();
-      renderActiveSong();
-
-      if (!serverSynced) {
-        triggerHTMLDownload(state.songs);
-      }
-    } catch (e) {
-      console.error(e);
-      showToast("Failed to save song.");
+    } else {
+      showToast("Guests cannot save songs.");
     }
   });
 
@@ -934,50 +1002,17 @@ function bindEvents(db) {
     if (!id) return;
 
     if (confirm("Are you sure you want to delete this song permanently?")) {
-      // Attempt to sync delete back to host disk using local server API
-      let serverSynced = false;
-      try {
-        const response = await fetch('/api/delete-song', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        });
-        if (response.ok) {
-          console.log("Delete successfully synced to local disk.");
-          serverSynced = true;
-        } else {
-          console.warn("Failed to sync delete to local disk, status:", response.status);
+      if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
+        try {
+          await dbFirestore.collection('songs').doc(id).delete();
+          showToast("Song deleted from cloud.");
+          closeSongModal();
+        } catch (err) {
+          console.error(err);
+          showToast("Failed to delete from cloud.");
         }
-      } catch (err) {
-        console.log("Local sync server unavailable. Deleting locally inside browser only.");
-      }
-
-      try {
-        showToast("Song deleted.");
-
-        state.songs = state.songs.filter(s => s.id !== id);
-        window.defaultSongs = (window.defaultSongs || []).filter(s => s.id !== id);
-        state.filteredSongs = [...state.songs];
-        updateSongCount();
-
-        closeSongModal();
-
-        if (state.songs.length > 0) {
-          state.currentSongId = state.songs[0].id;
-          localStorage.setItem('lastViewedSongId', state.currentSongId);
-        } else {
-          state.currentSongId = null;
-        }
-
-        renderSongList();
-        renderActiveSong();
-
-        if (!serverSynced) {
-          triggerHTMLDownload(state.songs);
-        }
-      } catch (e) {
-        console.error(e);
-        showToast("Failed to delete song.");
+      } else {
+        showToast("Guests cannot delete songs.");
       }
     }
   });
@@ -1503,21 +1538,61 @@ function bindEvents(db) {
   }
 
   if (el.newSetlistBtn) {
-    el.newSetlistBtn.addEventListener('click', async () => {
-      const name = prompt("Enter setlist name:");
-      if (!name || !name.trim()) return;
+    el.newSetlistBtn.addEventListener('click', () => {
+      const modal = document.getElementById('new-setlist-modal');
+      const shareGroup = document.getElementById('new-setlist-share-group');
+      const nameInput = document.getElementById('new-setlist-name');
+      const shareCheckbox = document.getElementById('new-setlist-share-checkbox');
+
+      if (nameInput) nameInput.value = '';
+      if (state.currentUser && !state.currentUser.isAnonymous) {
+        if (shareGroup) shareGroup.style.display = 'flex';
+        if (shareCheckbox) shareCheckbox.checked = false;
+      } else {
+        if (shareGroup) shareGroup.style.display = 'none';
+        if (shareCheckbox) shareCheckbox.checked = false;
+      }
+      if (modal) {
+        modal.classList.add('active');
+        if (nameInput) nameInput.focus();
+      }
+    });
+  }
+
+  const closeNewSetlist = () => {
+    const modal = document.getElementById('new-setlist-modal');
+    if (modal) modal.classList.remove('active');
+  };
+  
+  const closeBtn = document.getElementById('close-new-setlist-modal-btn');
+  if (closeBtn) closeBtn.addEventListener('click', closeNewSetlist);
+  
+  const cancelBtn = document.getElementById('cancel-new-setlist-modal-btn');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeNewSetlist);
+  
+  const createBtn = document.getElementById('create-new-setlist-btn');
+  if (createBtn) {
+    createBtn.addEventListener('click', async () => {
+      const nameInput = document.getElementById('new-setlist-name');
+      const shareCheckbox = document.getElementById('new-setlist-share-checkbox');
+      const name = nameInput ? nameInput.value.trim() : '';
+      if (!name) return;
 
       const newSetlist = {
         id: 'setlist_' + Date.now(),
-        name: name.trim(),
-        songs: []
+        name: name,
+        songs: [],
+        isShared: shareCheckbox ? shareCheckbox.checked : false
       };
 
       try {
-        if (db) {
-          await dbPutSetlist(db, newSetlist);
+        if (state.currentUser && !state.currentUser.isAnonymous) {
+          if (db) await dbPutSetlist(db, newSetlist);
+          // Snapshot listener will populate state.setlists, preventing duplication
+        } else {
+          if (db) await dbPutSetlist(db, newSetlist);
+          state.setlists.push(newSetlist);
         }
-        state.setlists.push(newSetlist);
         state.activeSetlistId = newSetlist.id;
         state.activeSetlistSongIndex = null;
         state.activeTab = 'setlists';
@@ -1525,6 +1600,7 @@ function bindEvents(db) {
         showToast("Setlist created.");
         renderToolbarSetlistSelect();
         renderSidebar();
+        closeNewSetlist();
       } catch (e) {
         console.error(e);
         showToast("Failed to create setlist.");
@@ -1555,6 +1631,22 @@ function bindEvents(db) {
           }
           renderActiveSong(); // update gig header title
           renderToolbarSetlistSelect();
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    });
+  }
+
+  if (setlistShareCheckbox) {
+    setlistShareCheckbox.addEventListener('change', async (e) => {
+      const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
+      if (setlist) {
+        setlist.isShared = e.target.checked;
+        try {
+          if (db) {
+            await dbPutSetlist(db, setlist);
+          }
         } catch (err) {
           console.error(err);
         }
@@ -2779,6 +2871,7 @@ function openSongModal(song = null) {
     el.formArtist.value = song.artist === 'Unknown Artist' ? '' : song.artist;
     el.formKey.value = song.key || '';
     el.formRtl.checked = song.isRTL;
+    if (formShare) formShare.checked = song.isShared || false;
     
     // Parse rawText to extract full image sources and replace them with short placeholders
     let rawText = song.rawText || '';
@@ -2801,6 +2894,7 @@ function openSongModal(song = null) {
     // New song mode
     el.modalTitle.textContent = "Add New Song";
     el.deleteSongBtn.style.display = 'none';
+    if (formShare) formShare.checked = false;
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'block';
   }
 
@@ -3001,6 +3095,14 @@ function renderSetlistEditor() {
   if (!setlist) return;
 
   el.setlistNameInput.value = setlist.name;
+  if (setlistShareCheckbox) setlistShareCheckbox.checked = setlist.isShared || false;
+  if (shareSetlistGroup) {
+    if (state.currentUser && !state.currentUser.isAnonymous) {
+      shareSetlistGroup.style.display = 'flex';
+    } else {
+      shareSetlistGroup.style.display = 'none';
+    }
+  }
 
   // Reset setlist song search state
   if (el.setlistAddSongSearch) {

@@ -19,6 +19,17 @@
         </div>
         <button class="btn mobile-menu-btn" id="hide-sidebar-btn" style="padding: 4px 8px; flex: none;">×</button>
       </div>
+
+      <!-- User Auth Section -->
+      <div class="auth-container" style="padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color);">
+        <div id="user-info" style="display: none; align-items: center; gap: 0.5rem; overflow: hidden;">
+          <img id="user-avatar" src="" alt="User" style="width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;">
+          <span id="user-name" style="font-size: 0.8rem; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></span>
+        </div>
+        <button class="btn btn-primary" id="login-btn" style="padding: 4px 8px; font-size: 0.75rem; width: 100%;">Sign in with Google</button>
+        <button class="btn" id="logout-btn" style="display: none; padding: 4px 8px; font-size: 0.75rem; flex-shrink: 0;">Sign Out</button>
+      </div>
+
       
       <!-- Sidebar Tabs -->
       <div class="sidebar-tabs">
@@ -48,6 +59,13 @@
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.3rem;">
           <button class="btn" id="setlist-back-btn" style="flex: none; padding: 4px 6px; font-size: 0.75rem;">← Back</button>
           <input type="text" id="setlist-name-input" class="form-control" style="font-weight: bold; font-size: 0.9rem; flex: 1; padding: 4px 6px;" placeholder="Setlist Name">
+          <div id="share-setlist-group" style="display: none; align-items: center; gap: 0.3rem; margin-right: 0.3rem;" title="Publicly Share Setlist">
+            <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: bold;">Public:</span>
+            <label class="toggle-switch" style="transform: scale(0.85); margin-bottom: 0;">
+              <input type="checkbox" id="setlist-share-checkbox">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
           <button class="btn" id="setlist-import-btn" style="flex: none; padding: 4px 6px; font-size: 0.75rem;" title="Import Setlist from JSON">Imp</button>
           <button class="btn" id="setlist-export-btn" style="flex: none; padding: 4px 6px; font-size: 0.75rem;" title="Export Setlist to JSON">Exp</button>
           <button class="btn" id="setlist-delete-btn" style="flex: none; padding: 4px 6px; font-size: 0.75rem; background: #ef4444; color: white; border-color: #ef4444;" title="Delete Setlist">Del</button>
@@ -267,6 +285,14 @@
           </div>
         </div>
         
+        <div class="form-group" id="share-song-group" style="display: none; flex-direction: row; align-items: center; gap: 0.5rem; background: var(--bg-primary); padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); margin-top: 0.5rem;">
+          <label class="toggle-switch" style="margin-bottom: 0;">
+            <input type="checkbox" id="form-share">
+            <span class="toggle-slider"></span>
+          </label>
+          <label for="form-share" style="cursor: pointer; margin-bottom: 0; font-size: 0.9rem; font-weight: bold;">Share Globally (Public)</label>
+        </div>
+
         <div class="form-group" id="remarks-group" style="display: none;">
           <label for="form-remarks">Remarks / Comments (Only for this Setlist)</label>
           <input type="text" class="form-control" id="form-remarks" placeholder="e.g. Play intro twice, fade out on outro...">
@@ -378,7 +404,34 @@
       </div>
       <div class="modal-footer">
         <button class="btn" id="cancel-restore-modal-btn">Cancel</button>
-        <button class="btn btn-primary" id="confirm-restore-btn" style="background-color: #ef4444; border-color: #ef4444; display: none;">Restore Selected Changes</button>
+        <button class="btn primary" id="confirm-restore-btn" style="display: none;">Confirm & Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Setlist Modal -->
+  <div class="modal-overlay" id="new-setlist-modal">
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <h2 style="font-size: 1.1rem;">Create New Setlist</h2>
+        <button class="btn" id="close-new-setlist-modal-btn" style="border: none; padding: 4px 8px; font-size: 1.2rem; cursor: pointer;">x</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem;">
+        <div class="form-group">
+          <label>Setlist Name</label>
+          <input type="text" id="new-setlist-name" class="form-control" placeholder="e.g. Sunday Gig">
+        </div>
+        <div class="form-group" id="new-setlist-share-group" style="display: none; align-items: center; gap: 0.5rem;">
+          <label class="toggle-switch" style="margin-bottom: 0;">
+            <input type="checkbox" id="new-setlist-share-checkbox">
+            <span class="toggle-slider"></span>
+          </label>
+          <label for="new-setlist-share-checkbox" style="margin: 0; cursor: pointer; font-size: 0.9rem; font-weight: bold;">Share Publicly</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="cancel-new-setlist-modal-btn">Cancel</button>
+        <button class="btn primary" id="create-new-setlist-btn">Create</button>
       </div>
     </div>
   </div>
@@ -401,6 +454,11 @@
       </svg>
     </button>
   </div>
+
+  <!-- Firebase Compat SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 
   <!-- JavaScript Modules -->
   <script src="jszip.min.js"></script>

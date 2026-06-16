@@ -19,6 +19,17 @@
         </div>
         <button class="btn mobile-menu-btn" id="hide-sidebar-btn" style="padding: 4px 8px; flex: none;">×</button>
       </div>
+
+      <!-- User Auth Section -->
+      <div class="auth-container" style="padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color);">
+        <div id="user-info" style="display: none; align-items: center; gap: 0.5rem; overflow: hidden;">
+          <img id="user-avatar" src="" alt="User" style="width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;">
+          <span id="user-name" style="font-size: 0.8rem; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></span>
+        </div>
+        <button class="btn btn-primary" id="login-btn" style="padding: 4px 8px; font-size: 0.75rem; width: 100%;">Sign in with Google</button>
+        <button class="btn" id="logout-btn" style="display: none; padding: 4px 8px; font-size: 0.75rem; flex-shrink: 0;">Sign Out</button>
+      </div>
+
       
       <!-- Sidebar Tabs -->
       <div class="sidebar-tabs">
@@ -51,6 +62,11 @@
           <button class="btn" id="setlist-import-btn" style="flex: none; padding: 4px 6px; font-size: 0.75rem;" title="Import Setlist from JSON">Imp</button>
           <button class="btn" id="setlist-export-btn" style="flex: none; padding: 4px 6px; font-size: 0.75rem;" title="Export Setlist to JSON">Exp</button>
           <button class="btn" id="setlist-delete-btn" style="flex: none; padding: 4px 6px; font-size: 0.75rem; background: #ef4444; color: white; border-color: #ef4444;" title="Delete Setlist">Del</button>
+        </div>
+        
+        <div id="share-setlist-group" style="display: none; align-items: center; gap: 0.5rem; padding: 0.3rem 0;">
+          <input type="checkbox" id="setlist-share-checkbox" style="width: 14px; height: 14px; cursor: pointer;">
+          <label for="setlist-share-checkbox" style="font-size: 0.8rem; margin: 0; cursor: pointer;">Share Setlist Publicly</label>
         </div>
         
         <!-- Add song to setlist dropdown -->
@@ -267,6 +283,11 @@
           </div>
         </div>
         
+        <div class="form-group" id="share-song-group" style="display: none; flex-direction: row; align-items: center; gap: 0.5rem; background: var(--bg-primary); padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); margin-top: 0.5rem;">
+          <input type="checkbox" id="form-share" style="width: 16px; height: 16px; cursor: pointer;">
+          <label for="form-share" style="cursor: pointer; margin-bottom: 0; font-size: 0.9rem; font-weight: bold;">Share Globally (Public)</label>
+        </div>
+
         <div class="form-group" id="remarks-group" style="display: none;">
           <label for="form-remarks">Remarks / Comments (Only for this Setlist)</label>
           <input type="text" class="form-control" id="form-remarks" placeholder="e.g. Play intro twice, fade out on outro...">
@@ -401,6 +422,11 @@
       </svg>
     </button>
   </div>
+
+  <!-- Firebase Compat SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 
   <!-- JavaScript Modules -->
   <script src="jszip.min.js"></script>
