@@ -463,13 +463,13 @@ async function init() {
           userName.textContent = user.displayName || 'User';
           userAvatar.src = user.photoURL || '';
           loginBtn.style.display = 'none';
-          logoutBtn.style.display = 'block';
+          logoutBtn.style.display = 'none'; // hide text button
           if (el.newSongBtn) el.newSongBtn.style.display = 'block';
           if (el.newSetlistBtn) el.newSetlistBtn.style.display = 'block';
         } else {
           // Guest
           userInfo.style.display = 'none';
-          loginBtn.style.display = 'block';
+          loginBtn.style.display = 'flex';
           logoutBtn.style.display = 'none';
           if (el.newSongBtn) el.newSongBtn.style.display = 'none'; // Guest can't add song
         }
@@ -489,6 +489,14 @@ async function init() {
     if (logoutBtn) {
       logoutBtn.addEventListener('click', () => {
         firebase.auth().signOut();
+      });
+    }
+
+    if (userInfo) {
+      userInfo.addEventListener('click', () => {
+        if (confirm("Do you want to sign out?")) {
+          firebase.auth().signOut();
+        }
       });
     }
   } else {
@@ -582,7 +590,7 @@ function loadSettings() {
   // Flat/Sharp preference
   const savedPreferFlats = localStorage.getItem('preferFlats') === 'true';
   state.preferFlats = savedPreferFlats;
-  el.enharmonicToggleBtn.textContent = savedPreferFlats ? 'b' : '#';
+  if (el.enharmonicToggleBtn) el.enharmonicToggleBtn.textContent = savedPreferFlats ? 'b' : '#';
 
   // Instrument selection
   const savedInstrument = localStorage.getItem('instrument') || 'guitar';
@@ -749,12 +757,14 @@ function bindEvents(db) {
       updateTransposeUI();
     }
   });
-  el.enharmonicToggleBtn.addEventListener('click', () => {
-    state.preferFlats = !state.preferFlats;
-    el.enharmonicToggleBtn.textContent = state.preferFlats ? 'b' : '#';
-    localStorage.setItem('preferFlats', state.preferFlats);
-    renderActiveSong();
-  });
+  if (el.enharmonicToggleBtn) {
+    el.enharmonicToggleBtn.addEventListener('click', () => {
+      state.preferFlats = !state.preferFlats;
+      el.enharmonicToggleBtn.textContent = state.preferFlats ? 'b' : '#';
+      localStorage.setItem('preferFlats', state.preferFlats);
+      renderActiveSong();
+    });
+  }
 
   // Auto Scroll Slider
   el.scrollSpeedSlider.addEventListener('input', (e) => {
@@ -3039,6 +3049,22 @@ function renderSetlistsList() {
         </div>
       </div>
       <div style="display: flex; gap: 0.2rem; align-items: center; flex-shrink: 0;">
+        ${(state.currentUser && !state.currentUser.isAnonymous) ? `
+        <button class="toggle-privacy-btn" title="${setlist.isShared ? 'Public - Click to make Private' : 'Private - Click to make Public'}" style="color: ${setlist.isShared ? 'var(--accent-color)' : 'var(--text-secondary)'}; border: none; background: transparent; width: 28px; height: 28px; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s, transform 0.15s ease; border-radius: 4px;">
+          ${setlist.isShared ? `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+          </svg>
+          ` : `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          `}
+        </button>
+        ` : ''}
         <button class="export-setlist-btn" title="Export Setlist" style="color: var(--text-secondary); border: none; background: transparent; width: 28px; height: 28px; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s, transform 0.15s ease; border-radius: 4px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -3061,6 +3087,20 @@ function renderSetlistsList() {
       e.stopPropagation(); // prevent opening the setlist editor
       exportSetlistToFile(setlist);
     });
+
+    const privacyBtn = item.querySelector('.toggle-privacy-btn');
+    if (privacyBtn) {
+      privacyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation(); // prevent opening the setlist editor
+        setlist.isShared = !setlist.isShared;
+        try {
+          if (db) await dbPutSetlist(db, setlist);
+          renderSetlistsList();
+        } catch (err) {
+          console.error(err);
+        }
+      });
+    }
 
     const deleteBtn = item.querySelector('.remove-setlist-btn');
     deleteBtn.addEventListener('click', async (e) => {

@@ -122,7 +122,13 @@ The output file [songbook.html](file:///c:/Develop/Github/songbook/outputs/songb
 
 ## 🆕 Release History & Changelog
 
-### Version 1.2.3 (Current)
+### Version 1.5.0 (Current)
+* **Firebase Cloud Sync**: Migrated to a cloud-first architecture using Firebase Firestore. Songs and setlists are now securely synced across all devices in real-time.
+* **Google Authentication**: Added Google Sign-In support. Users can securely log in to access their cloud-saved songs.
+* **Public & Private Setlists**: Added the ability to toggle setlists between Public (shared) and Private (personal). Easily share setlists with band members via a public URL.
+* **Streamlined Toolbar UI**: Fully reorganized and compressed the main toolbar into a responsive, single-line layout grouped into Operation, Display, and Management sections. Replaced bulky toggles with sleek modern SVG icons.
+
+### Version 1.2.3
 * **HTML and APK Production Rebuild**: Bundled standalone HTML and built native Android wrapper APK.
 
 ### Version 1.2.2
