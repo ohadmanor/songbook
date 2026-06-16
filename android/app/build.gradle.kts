@@ -96,24 +96,6 @@ abstract class BundleHtmlTask : DefaultTask() {
     fun run() {
         val rootDir = projectDir.get().asFile
         try {
-            val process = ProcessBuilder("python", "scripts/bundle_app.py")
-                .directory(rootDir)
-                .redirectErrorStream(true)
-                .start()
-            
-            process.inputStream.bufferedReader().use { reader ->
-                var line: String? = reader.readLine()
-                while (line != null) {
-                    println(line)
-                    line = reader.readLine()
-                }
-            }
-            
-            val exitCode = process.waitFor()
-            if (exitCode != 0) {
-                logger.warn("Warning: bundle_app.py exited with code $exitCode")
-            }
-            
             // Now run sync_android.py to ensure the updated web/ directory is synced into Android assets
             val syncProcess = ProcessBuilder("python", "scripts/sync_android.py")
                 .directory(rootDir)
@@ -133,7 +115,7 @@ abstract class BundleHtmlTask : DefaultTask() {
                 logger.warn("Warning: sync_android.py exited with code $syncExitCode")
             }
         } catch (e: Exception) {
-            logger.warn("Warning: Failed to execute bundle_app.py. Standalone HTML might be outdated. Error: ${e.message}")
+            logger.warn("Warning: Failed to execute sync_android.py. Error: ${e.message}")
         }
     }
 }
@@ -144,6 +126,9 @@ abstract class PublishOutputsTask : DefaultTask() {
 
     @get:OutputDirectory
     abstract val destinationDir: DirectoryProperty
+
+    @get:Input
+    abstract val deployToFirebase: Property<Boolean>
 
     @TaskAction
     fun run() {
@@ -169,6 +154,35 @@ abstract class PublishOutputsTask : DefaultTask() {
         } else {
             logger.warn("Warning: APK directory does not exist: ${apkDir.absolutePath}")
         }
+
+        // Deploy to Firebase Hosting if configured
+        if (deployToFirebase.get()) {
+            val rootDir = destinationDir.get().asFile.resolve("..")
+            logger.lifecycle("Deploying web assets to Firebase Hosting from directory: ${rootDir.absolutePath}...")
+            try {
+                val process = ProcessBuilder("cmd", "/c", "npx firebase-tools deploy --only hosting")
+                    .directory(rootDir)
+                    .redirectErrorStream(true)
+                    .start()
+                
+                process.inputStream.bufferedReader().use { reader ->
+                    var line: String? = reader.readLine()
+                    while (line != null) {
+                        println(line)
+                        line = reader.readLine()
+                    }
+                }
+                
+                val exitCode = process.waitFor()
+                if (exitCode != 0) {
+                    logger.warn("Warning: Firebase deploy failed with code $exitCode")
+                } else {
+                    logger.lifecycle("Firebase deployment completed successfully!")
+                }
+            } catch (e: Exception) {
+                logger.warn("Warning: Failed to execute Firebase deploy. Error: ${e.message}")
+            }
+        }
     }
 }
 
@@ -179,12 +193,14 @@ val bundleHtml = tasks.register<BundleHtmlTask>("bundleHtml") {
 val publishReleaseOutputs = tasks.register<PublishOutputsTask>("publishReleaseOutputs") {
     apkOutputDir.set(layout.buildDirectory.dir("outputs/apk/release"))
     destinationDir.set(layout.projectDirectory.dir("../../outputs"))
+    deployToFirebase.set(true)
     dependsOn(bundleHtml)
 }
 
 val publishDebugOutputs = tasks.register<PublishOutputsTask>("publishDebugOutputs") {
     apkOutputDir.set(layout.buildDirectory.dir("outputs/apk/debug"))
     destinationDir.set(layout.projectDirectory.dir("../../outputs"))
+    deployToFirebase.set(false)
     dependsOn(bundleHtml)
 }
 

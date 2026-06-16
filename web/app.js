@@ -185,7 +185,11 @@ const el = {
   restoreAddedCount: document.getElementById('restore-added-count'),
   restoreModifiedCount: document.getElementById('restore-modified-count'),
   restoreDeletedCount: document.getElementById('restore-deleted-count'),
-  restoreChangelogDetails: document.getElementById('restore-changelog-details')
+  restoreChangelogDetails: document.getElementById('restore-changelog-details'),
+  mobileSettingsBtn: document.getElementById('mobile-settings-btn'),
+  closeSettingsBtn: document.getElementById('close-settings-btn'),
+  toolbarActions: document.getElementById('toolbar-actions'),
+  bottomSheetBackdrop: document.getElementById('bottom-sheet-backdrop')
 };
 
 // Scroll animation variables
@@ -452,7 +456,20 @@ async function init() {
     db = null;
   }
 
+  // Load default local songs first so the app is immediately usable offline/local
+  state.songs = window.defaultSongs || [];
+  state.filteredSongs = [...state.songs];
+  sortSongs();
+  if (state.songs.length > 0) {
+    const lastViewedId = localStorage.getItem('lastViewedSongId');
+    const exists = state.songs.some(s => s.id === lastViewedId);
+    state.currentSongId = exists ? lastViewedId : state.songs[0].id;
+  }
+
   bindEvents(db);
+  renderSidebar();
+  renderSongList();
+  renderActiveSong();
 
   if (typeof firebase !== 'undefined') {
     firebase.auth().onAuthStateChanged((user) => {
@@ -475,7 +492,9 @@ async function init() {
         }
         startRealtimeSync();
       } else {
-        firebase.auth().signInAnonymously().catch(console.error);
+        firebase.auth().signInAnonymously().catch((err) => {
+          console.warn("Firebase anonymous sign-in failed (standard in local file:/// WebView environments):", err);
+        });
       }
     });
 
@@ -499,16 +518,32 @@ async function init() {
         }
       });
     }
-  } else {
-    // Fallback if no firebase
-    state.songs = window.defaultSongs || [];
-    state.filteredSongs = [...state.songs];
-    sortSongs();
-    if (state.songs.length > 0) state.currentSongId = state.songs[0].id;
-    renderSidebar();
-    renderSongList();
-    renderActiveSong();
   }
+
+  // Handle mobile layout responsive node movement for settings bottom sheet
+  const handleResponsiveLayout = () => {
+    const mobileQuery = window.matchMedia('(max-width: 768px)');
+    const toolbarActions = el.toolbarActions;
+    const toolbar = document.querySelector('.toolbar');
+    
+    if (!toolbarActions || !toolbar) return;
+
+    const moveLayout = (isMobile) => {
+      if (isMobile) {
+        if (toolbarActions.parentElement !== document.body) {
+          document.body.appendChild(toolbarActions);
+        }
+      } else {
+        if (toolbarActions.parentElement !== toolbar) {
+          toolbar.appendChild(toolbarActions);
+        }
+      }
+    };
+    
+    mobileQuery.addEventListener('change', (e) => moveLayout(e.matches));
+    moveLayout(mobileQuery.matches);
+  };
+  handleResponsiveLayout();
 }
 
 let unsubscribeSongs = null;
@@ -664,6 +699,12 @@ function bindEvents(db) {
               el.toolbarSearchDropdown.style.display = 'none';
               state.filteredSongs = [...state.songs];
               renderSongList();
+
+              // Close settings bottom sheet if open
+              if (el.toolbarActions) {
+                el.toolbarActions.classList.remove('active');
+                el.bottomSheetBackdrop.classList.remove('active');
+              }
             });
             el.toolbarSearchDropdown.appendChild(dropdownItem);
           });
@@ -814,6 +855,26 @@ function bindEvents(db) {
   // Mobile Nav Buttons
   el.showSidebarBtn.addEventListener('click', () => el.sidebar.classList.add('active'));
   el.hideSidebarBtn.addEventListener('click', () => el.sidebar.classList.remove('active'));
+
+  // Mobile Settings Drawer Event Listeners
+  if (el.mobileSettingsBtn) {
+    el.mobileSettingsBtn.addEventListener('click', () => {
+      el.toolbarActions.classList.add('active');
+      el.bottomSheetBackdrop.classList.add('active');
+    });
+  }
+  if (el.closeSettingsBtn) {
+    el.closeSettingsBtn.addEventListener('click', () => {
+      el.toolbarActions.classList.remove('active');
+      el.bottomSheetBackdrop.classList.remove('active');
+    });
+  }
+  if (el.bottomSheetBackdrop) {
+    el.bottomSheetBackdrop.addEventListener('click', () => {
+      el.toolbarActions.classList.remove('active');
+      el.bottomSheetBackdrop.classList.remove('active');
+    });
+  }
 
   // Maximize / Fullscreen toggle
   if (el.maximizeBtn) {
@@ -1526,6 +1587,12 @@ function bindEvents(db) {
       }
       renderSidebar();
       renderActiveSong();
+
+      // Close settings bottom sheet if open
+      if (el.toolbarActions) {
+        el.toolbarActions.classList.remove('active');
+        el.bottomSheetBackdrop.classList.remove('active');
+      }
     });
   }
 

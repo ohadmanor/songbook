@@ -90,6 +90,16 @@ def main():
         html
     )
     
+    # 3.4 Inline favicon.png if it exists
+    favicon_file = os.path.join(web_dir, 'favicon.png')
+    if os.path.exists(favicon_file):
+        with open(favicon_file, 'rb') as fav_f:
+            fav_b64 = base64.b64encode(fav_f.read()).decode('utf-8')
+        fav_data_url = f"data:image/png;base64,{fav_b64}"
+        html = html.replace('href="favicon.png"', f'href="{fav_data_url}"')
+        html = html.replace('src="favicon.png"', f'src="{fav_data_url}"')
+        print("Inlined favicon.png successfully.")
+
     # 3.5 Inline media images as base64 in the bundled html
     media_dir = os.path.join(web_dir, 'media')
     media_pattern = re.compile(r'media/([a-zA-Z0-9_\.-]+)')

@@ -55,6 +55,8 @@ class MainActivity : ComponentActivity() {
             settings.allowContentAccess = false
             settings.allowFileAccessFromFileURLs = false
             settings.allowUniversalAccessFromFileURLs = false
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
             
             webViewClient = WebViewClient()
             

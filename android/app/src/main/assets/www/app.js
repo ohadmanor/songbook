@@ -185,7 +185,11 @@ const el = {
   restoreAddedCount: document.getElementById('restore-added-count'),
   restoreModifiedCount: document.getElementById('restore-modified-count'),
   restoreDeletedCount: document.getElementById('restore-deleted-count'),
-  restoreChangelogDetails: document.getElementById('restore-changelog-details')
+  restoreChangelogDetails: document.getElementById('restore-changelog-details'),
+  mobileSettingsBtn: document.getElementById('mobile-settings-btn'),
+  closeSettingsBtn: document.getElementById('close-settings-btn'),
+  toolbarActions: document.getElementById('toolbar-actions'),
+  bottomSheetBackdrop: document.getElementById('bottom-sheet-backdrop')
 };
 
 // Scroll animation variables
@@ -452,7 +456,20 @@ async function init() {
     db = null;
   }
 
+  // Load default local songs first so the app is immediately usable offline/local
+  state.songs = window.defaultSongs || [];
+  state.filteredSongs = [...state.songs];
+  sortSongs();
+  if (state.songs.length > 0) {
+    const lastViewedId = localStorage.getItem('lastViewedSongId');
+    const exists = state.songs.some(s => s.id === lastViewedId);
+    state.currentSongId = exists ? lastViewedId : state.songs[0].id;
+  }
+
   bindEvents(db);
+  renderSidebar();
+  renderSongList();
+  renderActiveSong();
 
   if (typeof firebase !== 'undefined') {
     firebase.auth().onAuthStateChanged((user) => {
@@ -463,19 +480,21 @@ async function init() {
           userName.textContent = user.displayName || 'User';
           userAvatar.src = user.photoURL || '';
           loginBtn.style.display = 'none';
-          logoutBtn.style.display = 'block';
+          logoutBtn.style.display = 'none'; // hide text button
           if (el.newSongBtn) el.newSongBtn.style.display = 'block';
           if (el.newSetlistBtn) el.newSetlistBtn.style.display = 'block';
         } else {
           // Guest
           userInfo.style.display = 'none';
-          loginBtn.style.display = 'block';
+          loginBtn.style.display = 'flex';
           logoutBtn.style.display = 'none';
           if (el.newSongBtn) el.newSongBtn.style.display = 'none'; // Guest can't add song
         }
         startRealtimeSync();
       } else {
-        firebase.auth().signInAnonymously().catch(console.error);
+        firebase.auth().signInAnonymously().catch((err) => {
+          console.warn("Firebase anonymous sign-in failed (standard in local file:/// WebView environments):", err);
+        });
       }
     });
 
@@ -491,16 +510,40 @@ async function init() {
         firebase.auth().signOut();
       });
     }
-  } else {
-    // Fallback if no firebase
-    state.songs = window.defaultSongs || [];
-    state.filteredSongs = [...state.songs];
-    sortSongs();
-    if (state.songs.length > 0) state.currentSongId = state.songs[0].id;
-    renderSidebar();
-    renderSongList();
-    renderActiveSong();
+
+    if (userInfo) {
+      userInfo.addEventListener('click', () => {
+        if (confirm("Do you want to sign out?")) {
+          firebase.auth().signOut();
+        }
+      });
+    }
   }
+
+  // Handle mobile layout responsive node movement for settings bottom sheet
+  const handleResponsiveLayout = () => {
+    const mobileQuery = window.matchMedia('(max-width: 768px)');
+    const toolbarActions = el.toolbarActions;
+    const toolbar = document.querySelector('.toolbar');
+    
+    if (!toolbarActions || !toolbar) return;
+
+    const moveLayout = (isMobile) => {
+      if (isMobile) {
+        if (toolbarActions.parentElement !== document.body) {
+          document.body.appendChild(toolbarActions);
+        }
+      } else {
+        if (toolbarActions.parentElement !== toolbar) {
+          toolbar.appendChild(toolbarActions);
+        }
+      }
+    };
+    
+    mobileQuery.addEventListener('change', (e) => moveLayout(e.matches));
+    moveLayout(mobileQuery.matches);
+  };
+  handleResponsiveLayout();
 }
 
 let unsubscribeSongs = null;
@@ -582,7 +625,7 @@ function loadSettings() {
   // Flat/Sharp preference
   const savedPreferFlats = localStorage.getItem('preferFlats') === 'true';
   state.preferFlats = savedPreferFlats;
-  el.enharmonicToggleBtn.textContent = savedPreferFlats ? 'b' : '#';
+  if (el.enharmonicToggleBtn) el.enharmonicToggleBtn.textContent = savedPreferFlats ? 'b' : '#';
 
   // Instrument selection
   const savedInstrument = localStorage.getItem('instrument') || 'guitar';
@@ -656,6 +699,12 @@ function bindEvents(db) {
               el.toolbarSearchDropdown.style.display = 'none';
               state.filteredSongs = [...state.songs];
               renderSongList();
+
+              // Close settings bottom sheet if open
+              if (el.toolbarActions) {
+                el.toolbarActions.classList.remove('active');
+                el.bottomSheetBackdrop.classList.remove('active');
+              }
             });
             el.toolbarSearchDropdown.appendChild(dropdownItem);
           });
@@ -749,12 +798,14 @@ function bindEvents(db) {
       updateTransposeUI();
     }
   });
-  el.enharmonicToggleBtn.addEventListener('click', () => {
-    state.preferFlats = !state.preferFlats;
-    el.enharmonicToggleBtn.textContent = state.preferFlats ? 'b' : '#';
-    localStorage.setItem('preferFlats', state.preferFlats);
-    renderActiveSong();
-  });
+  if (el.enharmonicToggleBtn) {
+    el.enharmonicToggleBtn.addEventListener('click', () => {
+      state.preferFlats = !state.preferFlats;
+      el.enharmonicToggleBtn.textContent = state.preferFlats ? 'b' : '#';
+      localStorage.setItem('preferFlats', state.preferFlats);
+      renderActiveSong();
+    });
+  }
 
   // Auto Scroll Slider
   el.scrollSpeedSlider.addEventListener('input', (e) => {
@@ -804,6 +855,26 @@ function bindEvents(db) {
   // Mobile Nav Buttons
   el.showSidebarBtn.addEventListener('click', () => el.sidebar.classList.add('active'));
   el.hideSidebarBtn.addEventListener('click', () => el.sidebar.classList.remove('active'));
+
+  // Mobile Settings Drawer Event Listeners
+  if (el.mobileSettingsBtn) {
+    el.mobileSettingsBtn.addEventListener('click', () => {
+      el.toolbarActions.classList.add('active');
+      el.bottomSheetBackdrop.classList.add('active');
+    });
+  }
+  if (el.closeSettingsBtn) {
+    el.closeSettingsBtn.addEventListener('click', () => {
+      el.toolbarActions.classList.remove('active');
+      el.bottomSheetBackdrop.classList.remove('active');
+    });
+  }
+  if (el.bottomSheetBackdrop) {
+    el.bottomSheetBackdrop.addEventListener('click', () => {
+      el.toolbarActions.classList.remove('active');
+      el.bottomSheetBackdrop.classList.remove('active');
+    });
+  }
 
   // Maximize / Fullscreen toggle
   if (el.maximizeBtn) {
@@ -1516,6 +1587,12 @@ function bindEvents(db) {
       }
       renderSidebar();
       renderActiveSong();
+
+      // Close settings bottom sheet if open
+      if (el.toolbarActions) {
+        el.toolbarActions.classList.remove('active');
+        el.bottomSheetBackdrop.classList.remove('active');
+      }
     });
   }
 
@@ -1538,21 +1615,61 @@ function bindEvents(db) {
   }
 
   if (el.newSetlistBtn) {
-    el.newSetlistBtn.addEventListener('click', async () => {
-      const name = prompt("Enter setlist name:");
-      if (!name || !name.trim()) return;
+    el.newSetlistBtn.addEventListener('click', () => {
+      const modal = document.getElementById('new-setlist-modal');
+      const shareGroup = document.getElementById('new-setlist-share-group');
+      const nameInput = document.getElementById('new-setlist-name');
+      const shareCheckbox = document.getElementById('new-setlist-share-checkbox');
+
+      if (nameInput) nameInput.value = '';
+      if (state.currentUser && !state.currentUser.isAnonymous) {
+        if (shareGroup) shareGroup.style.display = 'flex';
+        if (shareCheckbox) shareCheckbox.checked = false;
+      } else {
+        if (shareGroup) shareGroup.style.display = 'none';
+        if (shareCheckbox) shareCheckbox.checked = false;
+      }
+      if (modal) {
+        modal.classList.add('active');
+        if (nameInput) nameInput.focus();
+      }
+    });
+  }
+
+  const closeNewSetlist = () => {
+    const modal = document.getElementById('new-setlist-modal');
+    if (modal) modal.classList.remove('active');
+  };
+  
+  const closeBtn = document.getElementById('close-new-setlist-modal-btn');
+  if (closeBtn) closeBtn.addEventListener('click', closeNewSetlist);
+  
+  const cancelBtn = document.getElementById('cancel-new-setlist-modal-btn');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeNewSetlist);
+  
+  const createBtn = document.getElementById('create-new-setlist-btn');
+  if (createBtn) {
+    createBtn.addEventListener('click', async () => {
+      const nameInput = document.getElementById('new-setlist-name');
+      const shareCheckbox = document.getElementById('new-setlist-share-checkbox');
+      const name = nameInput ? nameInput.value.trim() : '';
+      if (!name) return;
 
       const newSetlist = {
         id: 'setlist_' + Date.now(),
-        name: name.trim(),
-        songs: []
+        name: name,
+        songs: [],
+        isShared: shareCheckbox ? shareCheckbox.checked : false
       };
 
       try {
-        if (db) {
-          await dbPutSetlist(db, newSetlist);
+        if (state.currentUser && !state.currentUser.isAnonymous) {
+          if (db) await dbPutSetlist(db, newSetlist);
+          // Snapshot listener will populate state.setlists, preventing duplication
+        } else {
+          if (db) await dbPutSetlist(db, newSetlist);
+          state.setlists.push(newSetlist);
         }
-        state.setlists.push(newSetlist);
         state.activeSetlistId = newSetlist.id;
         state.activeSetlistSongIndex = null;
         state.activeTab = 'setlists';
@@ -1560,6 +1677,7 @@ function bindEvents(db) {
         showToast("Setlist created.");
         renderToolbarSetlistSelect();
         renderSidebar();
+        closeNewSetlist();
       } catch (e) {
         console.error(e);
         showToast("Failed to create setlist.");
@@ -2998,6 +3116,22 @@ function renderSetlistsList() {
         </div>
       </div>
       <div style="display: flex; gap: 0.2rem; align-items: center; flex-shrink: 0;">
+        ${(state.currentUser && !state.currentUser.isAnonymous) ? `
+        <button class="toggle-privacy-btn" title="${setlist.isShared ? 'Public - Click to make Private' : 'Private - Click to make Public'}" style="color: ${setlist.isShared ? 'var(--accent-color)' : 'var(--text-secondary)'}; border: none; background: transparent; width: 28px; height: 28px; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s, transform 0.15s ease; border-radius: 4px;">
+          ${setlist.isShared ? `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+          </svg>
+          ` : `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          `}
+        </button>
+        ` : ''}
         <button class="export-setlist-btn" title="Export Setlist" style="color: var(--text-secondary); border: none; background: transparent; width: 28px; height: 28px; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s, transform 0.15s ease; border-radius: 4px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -3020,6 +3154,20 @@ function renderSetlistsList() {
       e.stopPropagation(); // prevent opening the setlist editor
       exportSetlistToFile(setlist);
     });
+
+    const privacyBtn = item.querySelector('.toggle-privacy-btn');
+    if (privacyBtn) {
+      privacyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation(); // prevent opening the setlist editor
+        setlist.isShared = !setlist.isShared;
+        try {
+          if (db) await dbPutSetlist(db, setlist);
+          renderSetlistsList();
+        } catch (err) {
+          console.error(err);
+        }
+      });
+    }
 
     const deleteBtn = item.querySelector('.remove-setlist-btn');
     deleteBtn.addEventListener('click', async (e) => {
@@ -3055,7 +3203,13 @@ function renderSetlistEditor() {
 
   el.setlistNameInput.value = setlist.name;
   if (setlistShareCheckbox) setlistShareCheckbox.checked = setlist.isShared || false;
-
+  if (shareSetlistGroup) {
+    if (state.currentUser && !state.currentUser.isAnonymous) {
+      shareSetlistGroup.style.display = 'flex';
+    } else {
+      shareSetlistGroup.style.display = 'none';
+    }
+  }
 
   // Reset setlist song search state
   if (el.setlistAddSongSearch) {
