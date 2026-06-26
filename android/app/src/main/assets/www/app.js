@@ -457,7 +457,28 @@ async function init() {
   }
 
   // Load default local songs first so the app is immediately usable offline/local
-  state.songs = window.defaultSongs || [];
+  let defaultSongs = window.defaultSongs || [];
+  let deletedSongIds = [];
+  try {
+    deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
+  } catch (e) {}
+  defaultSongs = defaultSongs.filter(s => !deletedSongIds.includes(s.id));
+  state.songs = [...defaultSongs];
+
+  if (db) {
+    try {
+      const localSongs = await dbGetAllSongs(db);
+      if (localSongs && localSongs.length > 0) {
+        const merged = new Map();
+        state.songs.forEach(s => merged.set(s.id, s));
+        localSongs.forEach(s => merged.set(s.id, s));
+        state.songs = Array.from(merged.values());
+      }
+    } catch (error) {
+      console.error("Error loading local IndexedDB songs:", error);
+    }
+  }
+
   state.filteredSongs = [...state.songs];
   sortSongs();
   if (state.songs.length > 0) {
@@ -488,7 +509,10 @@ async function init() {
           userInfo.style.display = 'none';
           loginBtn.style.display = 'flex';
           logoutBtn.style.display = 'none';
-          if (el.newSongBtn) el.newSongBtn.style.display = 'none'; // Guest can't add song
+          if (el.newSongBtn) {
+            const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+            el.newSongBtn.style.display = isLocalOrDev ? 'block' : 'none';
+          }
         }
         startRealtimeSync();
       } else {
@@ -556,14 +580,23 @@ function startRealtimeSync() {
   if (unsubscribeSongs) unsubscribeSongs();
   unsubscribeSongs = dbFirestore.collection('songs').onSnapshot((snapshot) => {
     let songs = [];
+    let deletedCloudSongIds = new Set();
     snapshot.forEach(doc => {
       const data = doc.data();
-      if (data.isShared || data.ownerId === uid) {
+      if (data.ownerId === uid && data.deleted) {
+        deletedCloudSongIds.add(data.id);
+      } else if (data.isShared || data.ownerId === uid) {
         songs.push(data);
       }
     });
     
-    const defaultSongs = window.defaultSongs || [];
+    let defaultSongs = window.defaultSongs || [];
+    let deletedSongIds = [];
+    try {
+      deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
+    } catch (e) {}
+    defaultSongs = defaultSongs.filter(s => !deletedSongIds.includes(s.id) && !deletedCloudSongIds.has(s.id));
+
     const merged = new Map();
     defaultSongs.forEach(s => merged.set(s.id, s));
     songs.forEach(s => merged.set(s.id, s));
@@ -572,7 +605,15 @@ function startRealtimeSync() {
     state.filteredSongs = [...state.songs];
     sortSongs();
     
-    if (!state.currentSongId && state.songs.length > 0) {
+    // If the current song no longer exists (e.g., deleted), reset it
+    if (state.currentSongId && !state.songs.some(s => s.id === state.currentSongId)) {
+      state.currentSongId = state.songs.length > 0 ? state.songs[0].id : null;
+      if (state.currentSongId) {
+        localStorage.setItem('lastViewedSongId', state.currentSongId);
+      } else {
+        localStorage.removeItem('lastViewedSongId');
+      }
+    } else if (!state.currentSongId && state.songs.length > 0) {
       const lastViewedId = localStorage.getItem('lastViewedSongId');
       const exists = state.songs.some(s => s.id === lastViewedId);
       state.currentSongId = exists ? lastViewedId : state.songs[0].id;
@@ -1063,7 +1104,65 @@ function bindEvents(db) {
         showToast("Failed to save to cloud.");
       }
     } else {
-      showToast("Guests cannot save songs.");
+      const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+      if (isLocalOrDev) {
+        // Remove from deletedSongIds in localStorage (if it was there)
+        let deletedSongIds = [];
+        try {
+          deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
+        } catch (e) {}
+        if (deletedSongIds.includes(id)) {
+          deletedSongIds = deletedSongIds.filter(x => x !== id);
+          localStorage.setItem('deletedSongIds', JSON.stringify(deletedSongIds));
+        }
+
+        // Save to IndexedDB
+        if (db) {
+          try {
+            await dbPutSong(db, song);
+          } catch (e) {
+            console.error("Failed to save to IndexedDB:", e);
+          }
+        }
+
+        // If running on local dev server, call save-song API
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+          try {
+            const response = await fetch('/api/save-song', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(song)
+            });
+            if (!response.ok) throw new Error("Server save failed");
+            showToast("Song saved locally & synced with disk.");
+          } catch (err) {
+            console.error("Local sync save failed:", err);
+            showToast("Song saved locally (disk sync failed).");
+          }
+        } else {
+          showToast("Song saved locally.");
+        }
+
+        // Update local state and refresh UI immediately
+        const idx = state.songs.findIndex(s => s.id === id);
+        if (idx !== -1) {
+          state.songs[idx] = song;
+        } else {
+          state.songs.push(song);
+        }
+        state.filteredSongs = [...state.songs];
+        sortSongs();
+
+        state.currentSongId = id;
+        localStorage.setItem('lastViewedSongId', id);
+
+        renderSidebar();
+        renderSongList();
+        renderActiveSong();
+        closeSongModal();
+      } else {
+        showToast("Guests cannot save songs.");
+      }
     }
   });
 
@@ -1075,15 +1174,122 @@ function bindEvents(db) {
     if (confirm("Are you sure you want to delete this song permanently?")) {
       if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
         try {
-          await dbFirestore.collection('songs').doc(id).delete();
+          if (!id.startsWith('custom_')) {
+            // It's a default song. Set tombstone in Firestore.
+            await dbFirestore.collection('songs').doc(id).set({
+              id,
+              deleted: true,
+              ownerId: state.currentUser.uid
+            });
+            
+            // Also store in local deletedSongIds so we know it's deleted locally
+            let deletedSongIds = [];
+            try {
+              deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
+            } catch (e) {}
+            if (!deletedSongIds.includes(id)) {
+              deletedSongIds.push(id);
+              localStorage.setItem('deletedSongIds', JSON.stringify(deletedSongIds));
+            }
+          } else {
+            // It's a custom song. Delete from Firestore.
+            await dbFirestore.collection('songs').doc(id).delete();
+          }
+
+          // Also delete from IndexedDB in case it exists locally
+          if (db) {
+            try {
+              await dbDeleteSong(db, id);
+            } catch (e) {
+              console.error("Failed to delete from IndexedDB:", e);
+            }
+          }
+
           showToast("Song deleted from cloud.");
+
+          // Update local state and refresh UI immediately
+          state.songs = state.songs.filter(s => s.id !== id);
+          state.filteredSongs = state.filteredSongs.filter(s => s.id !== id);
+
+          if (state.currentSongId === id) {
+            state.currentSongId = state.songs.length > 0 ? state.songs[0].id : null;
+            if (state.currentSongId) {
+              localStorage.setItem('lastViewedSongId', state.currentSongId);
+            } else {
+              localStorage.removeItem('lastViewedSongId');
+            }
+          }
+
+          renderSidebar();
+          renderSongList();
+          renderActiveSong();
           closeSongModal();
         } catch (err) {
           console.error(err);
           showToast("Failed to delete from cloud.");
         }
       } else {
-        showToast("Guests cannot delete songs.");
+        const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+        if (isLocalOrDev) {
+          // If default song, add to deleted default list in localStorage
+          if (!id.startsWith('custom_')) {
+            let deletedSongIds = [];
+            try {
+              deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
+            } catch (e) {}
+            if (!deletedSongIds.includes(id)) {
+              deletedSongIds.push(id);
+              localStorage.setItem('deletedSongIds', JSON.stringify(deletedSongIds));
+            }
+          }
+
+          // Delete from IndexedDB
+          if (db) {
+            try {
+              await dbDeleteSong(db, id);
+            } catch (e) {
+              console.error("Failed to delete from IndexedDB:", e);
+            }
+          }
+
+          // If running on local dev server, call delete-song API
+          if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+            try {
+              const response = await fetch('/api/delete-song', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+              });
+              if (!response.ok) throw new Error("Server delete failed");
+              showToast("Song deleted locally & synced with disk.");
+            } catch (err) {
+              console.error("Local sync delete failed:", err);
+              showToast("Song deleted locally (disk sync failed).");
+            }
+          } else {
+            showToast("Song deleted locally.");
+          }
+
+          // Update local state and refresh UI immediately
+          state.songs = state.songs.filter(s => s.id !== id);
+          state.filteredSongs = state.filteredSongs.filter(s => s.id !== id);
+
+          if (state.currentSongId === id) {
+            state.currentSongId = state.songs.length > 0 ? state.songs[0].id : null;
+            if (state.currentSongId) {
+              localStorage.setItem('lastViewedSongId', state.currentSongId);
+            } else {
+              localStorage.removeItem('lastViewedSongId');
+            }
+          }
+
+          renderSidebar();
+          renderSongList();
+          renderActiveSong();
+          closeSongModal();
+        } else {
+          showToast("Guests cannot delete songs.");
+        }
       }
     }
   });
@@ -1479,6 +1685,7 @@ function bindEvents(db) {
 
         if (response.ok) {
           serverSynced = true;
+          localStorage.removeItem('deletedSongIds');
           showToast("Database restored successfully! Reloading...");
           setTimeout(() => {
             window.location.reload();
@@ -1493,6 +1700,7 @@ function bindEvents(db) {
       }
 
       if (!serverSynced) {
+        localStorage.removeItem('deletedSongIds');
         state.songs = songsToRestore;
         window.defaultSongs = [...songsToRestore];
         state.filteredSongs = [...songsToRestore];

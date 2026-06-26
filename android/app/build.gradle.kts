@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.songbook"
         minSdk = 23
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.2.3"
+        versionCode = 14
+        versionName = "1.5.1"
     }
 
     buildTypes {
@@ -86,6 +86,14 @@ dependencies {
   implementation(libs.androidx.navigation3.ui)
   implementation(libs.androidx.navigation3.runtime)
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+
+  // WebKit for secure WebView loading (WebViewAssetLoader)
+  implementation("androidx.webkit:webkit:1.12.0")
+}
+
+// Ensure web assets are bundled and synced before compiling the APK
+tasks.named("preBuild") {
+    dependsOn(tasks.named("bundleHtml"))
 }
 
 abstract class BundleHtmlTask : DefaultTask() {
