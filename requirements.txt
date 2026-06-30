@@ -1,0 +1,2 @@
+debugpy
+agent-dev-cli>=0.0.1b260427

@@ -9,20 +9,29 @@ base {
 }
 
 android {
-    namespace = "com.example.songbook"
+    namespace = "com.mymusic.songbook"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.example.songbook"
+        applicationId = "com.mymusic.songbook"
         minSdk = 23
         targetSdk = 36
         versionCode = 14
-        versionName = "1.5.1"
+        versionName = "1.5.5"
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("release.keystore")
+            storePassword = "songbook2026"
+            keyAlias = "songbook"
+            keyPassword = "songbook2026"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -68,19 +77,7 @@ dependencies {
   implementation(libs.androidx.compose.material3)
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
-  // Instrumented tests
-  androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-  debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-  // Local tests: jUnit, coroutines, Android runner
-  testImplementation(libs.junit)
-  testImplementation(libs.kotlinx.coroutines.test)
-
-  // Instrumented tests: jUnit rules and runners
-  androidTestImplementation(libs.androidx.test.core)
-  androidTestImplementation(libs.androidx.test.ext.junit)
-  androidTestImplementation(libs.androidx.test.runner)
-  androidTestImplementation(libs.androidx.test.espresso.core)
 
   // Navigation
   implementation(libs.androidx.navigation3.ui)
@@ -89,6 +86,9 @@ dependencies {
 
   // WebKit for secure WebView loading (WebViewAssetLoader)
   implementation("androidx.webkit:webkit:1.12.0")
+
+  // Google Sign-In Native Auth
+  implementation("com.google.android.gms:play-services-auth:21.1.1")
 }
 
 // Ensure web assets are bundled and synced before compiling the APK

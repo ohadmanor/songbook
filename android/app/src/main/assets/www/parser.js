@@ -317,10 +317,12 @@ function parseSongText(rawText) {
       
       if (nextTrimmed !== '' && !isHeaderLine(nextLine) && !isChordLine(nextLine)) {
         // Aligned pair!
+        const alignedSegments = alignChordsAndLyrics(line, nextLine);
         currentParagraph.lines.push({
           type: 'chord-lyric',
           rawChordLine: line,
-          rawLyricLine: nextLine
+          rawLyricLine: nextLine,
+          segments: alignedSegments
         });
         i++; // skip next line as it is consumed
       } else {

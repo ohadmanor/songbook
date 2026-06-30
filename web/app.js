@@ -150,9 +150,9 @@ const el = {
   metroBpmIncBtn: document.getElementById('metro-bpm-inc-btn'),
   metroBeatsSelect: document.getElementById('metro-beats-select'),
 
-  // Modal Elements
+  // Modal & Editor Elements
   newSongBtn: document.getElementById('new-song-btn'),
-  songModal: document.getElementById('song-modal'),
+  songModal: document.getElementById('song-editor-view'),
   closeModalBtn: document.getElementById('close-modal-btn'),
   cancelModalBtn: document.getElementById('cancel-modal-btn'),
   saveSongBtn: document.getElementById('save-song-btn'),
@@ -166,14 +166,14 @@ const el = {
   formText: document.getElementById('form-text'),
   remarksGroup: document.getElementById('remarks-group'),
   formRemarks: document.getElementById('form-remarks'),
-  editorBoldBtn: document.getElementById('editor-bold-btn'),
-  editorHighlightBtn: document.getElementById('editor-highlight-btn'),
-  editorHighlightGreenBtn: document.getElementById('editor-highlight-green-btn'),
-  editorImportImageBtn: document.getElementById('editor-import-image-btn'),
-  editorImageInput: document.getElementById('editor-image-input'),
   importDocxGroup: document.getElementById('import-docx-group'),
   formImportFile: document.getElementById('form-import-file'),
   importStatus: document.getElementById('import-status'),
+  mainToolbar: document.getElementById('main-toolbar'),
+  editorBackBtn: document.getElementById('editor-back-btn'),
+  editorPreviewToggleBtn: document.getElementById('editor-preview-toggle-btn'),
+  editorFormatChordsBtn: document.getElementById('editor-format-chords-btn'),
+  editorPreviewDisplay: document.getElementById('editor-preview-display'),
   exportDbBtn: document.getElementById('export-db-btn'),
   restoreBackupBtn: document.getElementById('restore-backup-btn'),
   restoreConfirmModal: document.getElementById('restore-confirm-modal'),
@@ -189,7 +189,9 @@ const el = {
   mobileSettingsBtn: document.getElementById('mobile-settings-btn'),
   closeSettingsBtn: document.getElementById('close-settings-btn'),
   toolbarActions: document.getElementById('toolbar-actions'),
-  bottomSheetBackdrop: document.getElementById('bottom-sheet-backdrop')
+  bottomSheetBackdrop: document.getElementById('bottom-sheet-backdrop'),
+  dashboardNewSetlistBtn: document.getElementById('dashboard-new-setlist-btn'),
+  dashboardImportSetlistBtn: document.getElementById('dashboard-import-setlist-btn')
 };
 
 // Scroll animation variables
@@ -493,56 +495,102 @@ async function init() {
   renderActiveSong();
 
   if (typeof firebase !== 'undefined') {
-    firebase.auth().onAuthStateChanged((user) => {
-      if (user) {
-        state.currentUser = user;
-        if (!user.isAnonymous) {
-          userInfo.style.display = 'flex';
-          userName.textContent = user.displayName || 'User';
-          userAvatar.src = user.photoURL || '';
-          loginBtn.style.display = 'none';
-          logoutBtn.style.display = 'none'; // hide text button
-          if (el.newSongBtn) el.newSongBtn.style.display = 'block';
-          if (el.newSetlistBtn) el.newSetlistBtn.style.display = 'block';
-        } else {
-          // Guest
-          userInfo.style.display = 'none';
-          loginBtn.style.display = 'flex';
-          logoutBtn.style.display = 'none';
-          if (el.newSongBtn) {
-            const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
-            el.newSongBtn.style.display = isLocalOrDev ? 'block' : 'none';
+    try {
+      firebase.auth().onAuthStateChanged((user) => {
+        if (user) {
+          state.currentUser = user;
+          if (!user.isAnonymous) {
+            userInfo.style.display = 'flex';
+            userName.textContent = user.displayName || 'User';
+            userAvatar.src = user.photoURL || '';
+            loginBtn.style.display = 'none';
+            logoutBtn.style.display = 'none'; // hide text button
+            if (el.newSongBtn) el.newSongBtn.style.display = 'block';
+            if (el.newSetlistBtn) el.newSetlistBtn.style.display = 'block';
+            if (el.dashboardNewSetlistBtn) el.dashboardNewSetlistBtn.style.display = 'flex';
+            if (el.dashboardImportSetlistBtn) el.dashboardImportSetlistBtn.style.display = 'flex';
+            if (el.exportDbBtn) el.exportDbBtn.style.display = '';
+            if (el.restoreBackupBtn) el.restoreBackupBtn.style.display = '';
+          } else {
+            // Guest
+            userInfo.style.display = 'none';
+            loginBtn.style.display = 'flex';
+            logoutBtn.style.display = 'none';
+            if (el.newSongBtn) el.newSongBtn.style.display = 'none';
+            if (el.newSetlistBtn) el.newSetlistBtn.style.display = 'none';
+            if (el.dashboardNewSetlistBtn) el.dashboardNewSetlistBtn.style.display = 'none';
+            if (el.dashboardImportSetlistBtn) el.dashboardImportSetlistBtn.style.display = 'none';
+            if (el.exportDbBtn) el.exportDbBtn.style.display = 'none';
+            if (el.restoreBackupBtn) el.restoreBackupBtn.style.display = 'none';
           }
-        }
-        startRealtimeSync();
-      } else {
-        firebase.auth().signInAnonymously().catch((err) => {
-          console.warn("Firebase anonymous sign-in failed (standard in local file:/// WebView environments):", err);
-        });
-      }
-    });
-
-    if (loginBtn) {
-      loginBtn.addEventListener('click', () => {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        firebase.auth().signInWithPopup(provider).catch(console.error);
-      });
-    }
-
-    if (logoutBtn) {
-      logoutBtn.addEventListener('click', () => {
-        firebase.auth().signOut();
-      });
-    }
-
-    if (userInfo) {
-      userInfo.addEventListener('click', () => {
-        if (confirm("Do you want to sign out?")) {
-          firebase.auth().signOut();
+          startRealtimeSync();
+        } else {
+          firebase.auth().signInAnonymously().catch((err) => {
+            console.warn("Firebase anonymous sign-in failed (standard in local file:/// WebView environments):", err);
+          });
         }
       });
+    } catch (e) {
+      console.warn("Firebase Auth error: ", e);
     }
   }
+
+  // Bind auth events regardless of firebase being loaded, to support native App fallback
+  if (loginBtn) {
+    loginBtn.addEventListener('click', () => {
+      if (typeof AndroidApp !== 'undefined' && AndroidApp.startGoogleSignIn) {
+        AndroidApp.startGoogleSignIn();
+      } else if (typeof firebase !== 'undefined' && firebase.auth) {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        firebase.auth().signInWithPopup(provider).catch(console.error);
+      } else {
+        alert("Authentication is currently unavailable.");
+      }
+    });
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      if (typeof firebase !== 'undefined' && firebase.auth) {
+        firebase.auth().signOut();
+      }
+      if (typeof AndroidApp !== 'undefined' && AndroidApp.signOut) {
+        AndroidApp.signOut();
+      }
+    });
+  }
+
+  if (userInfo) {
+    userInfo.addEventListener('click', () => {
+      if (confirm("Do you want to sign out?")) {
+        if (typeof firebase !== 'undefined' && firebase.auth) {
+          firebase.auth().signOut();
+        }
+        if (typeof AndroidApp !== 'undefined' && AndroidApp.signOut) {
+          AndroidApp.signOut();
+        }
+      }
+    });
+  }
+
+  // Expose global function for Android Native Google Sign-In
+  window.handleNativeGoogleLogin = function(idToken) {
+    if (typeof firebase !== 'undefined' && firebase.auth) {
+      const credential = firebase.auth.GoogleAuthProvider.credential(idToken);
+      firebase.auth().signInWithCredential(credential).catch(err => {
+        console.error("Firebase Auth failed with native token:", err);
+        if (typeof AndroidApp !== 'undefined' && AndroidApp.showToast) {
+          AndroidApp.showToast("Login Failed: " + err.message);
+        } else {
+          alert("Login Failed: " + err.message);
+        }
+      });
+    } else {
+      if (typeof AndroidApp !== 'undefined' && AndroidApp.showToast) {
+        AndroidApp.showToast("Login Failed: Firebase is not initialized");
+      }
+    }
+  };
 
   // Handle mobile layout responsive node movement for settings bottom sheet
   const handleResponsiveLayout = () => {
@@ -583,9 +631,9 @@ function startRealtimeSync() {
     let deletedCloudSongIds = new Set();
     snapshot.forEach(doc => {
       const data = doc.data();
-      if (data.ownerId === uid && data.deleted) {
+      if (data.deleted) {
         deletedCloudSongIds.add(data.id);
-      } else if (data.isShared || data.ownerId === uid) {
+      } else {
         songs.push(data);
       }
     });
@@ -629,6 +677,7 @@ function startRealtimeSync() {
     dbGetAllSetlists(db).then(setlists => {
       state.setlists = setlists || [];
       renderToolbarSetlistSelect();
+      renderSidebar();
     });
   } else {
     unsubscribeSetlists = dbFirestore.collection('setlists').onSnapshot((snapshot) => {
@@ -641,7 +690,7 @@ function startRealtimeSync() {
       });
       state.setlists = setlists;
       renderToolbarSetlistSelect();
-      if (typeof renderSetlistsTab === 'function') renderSetlistsTab();
+      renderSidebar();
     });
   }
 }
@@ -938,8 +987,110 @@ function bindEvents(db) {
 
   // Modals opening/closing
   el.newSongBtn.addEventListener('click', () => openSongModal());
-  el.closeModalBtn.addEventListener('click', () => closeSongModal());
+  if (el.closeModalBtn) el.closeModalBtn.addEventListener('click', () => closeSongModal());
   el.cancelModalBtn.addEventListener('click', () => closeSongModal());
+  if (el.editorBackBtn) el.editorBackBtn.addEventListener('click', () => closeSongModal());
+
+  const editorThemeToggleBtn = document.getElementById('editor-theme-toggle-btn');
+  if (editorThemeToggleBtn) {
+    editorThemeToggleBtn.addEventListener('click', () => {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+      const newTheme = (currentTheme === 'light') ? 'dark' : 'light';
+      state.theme = newTheme;
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      if (el.themeSelect) el.themeSelect.value = newTheme;
+      editorThemeToggleBtn.textContent = newTheme === 'light' ? 'light_mode' : 'dark_mode';
+    });
+  }
+
+  const editorFullscreenToggleBtn = document.getElementById('editor-fullscreen-toggle-btn');
+  if (editorFullscreenToggleBtn) {
+    editorFullscreenToggleBtn.addEventListener('click', () => {
+      toggleFullscreen(!state.isFullscreen);
+    });
+  }
+
+  // Editor Preview and Formatting Event Bindings
+  if (el.editorPreviewToggleBtn && el.editorPreviewDisplay && el.formText) {
+    el.editorPreviewToggleBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const isPreview = el.editorPreviewDisplay.style.display !== 'none';
+      if (isPreview) {
+        // Switch back to edit mode
+        el.editorPreviewDisplay.style.display = 'none';
+        el.formText.style.display = 'block';
+        const span = el.editorPreviewToggleBtn.querySelector('span');
+        if (span) span.textContent = 'visibility';
+        el.editorPreviewToggleBtn.title = 'Preview Mode';
+      } else {
+        // Switch to preview mode
+        const rawText = el.formText.value || '';
+        
+        // Build image replacement map for the editor temporary image store
+        const textWithFullImages = rawText.replace(/\[IMAGE:\s*(\d+)\]/g, (match, idxStr) => {
+          const idx = parseInt(idxStr, 10) - 1;
+          if (state.editorImages && state.editorImages[idx]) {
+            return `[IMAGE: ${state.editorImages[idx]}]`;
+          }
+          return match;
+        });
+
+        // Resolve images option
+        const rendered = buildSongBodyFromRawText(textWithFullImages, {
+          isRTL: el.formRtl ? el.formRtl.checked : false
+        });
+        
+        el.editorPreviewDisplay.innerHTML = '';
+        el.editorPreviewDisplay.appendChild(rendered);
+        
+        // Hide editor textarea, show preview container
+        el.formText.style.display = 'none';
+        el.editorPreviewDisplay.style.display = 'block';
+        const span = el.editorPreviewToggleBtn.querySelector('span');
+        if (span) span.textContent = 'edit';
+        el.editorPreviewToggleBtn.title = 'Edit Mode';
+      }
+    });
+  }
+
+  if (el.editorFormatChordsBtn && el.formText) {
+    el.editorFormatChordsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const originalText = el.formText.value || '';
+      const formatted = originalText.split('\n').map(line => line.trimEnd()).join('\n');
+      el.formText.value = formatted;
+      showToast("Chords formatted (trailing whitespace trimmed).");
+      
+      // If we are currently in preview mode, refresh the preview
+      if (el.editorPreviewDisplay.style.display !== 'none') {
+        const textWithFullImages = formatted.replace(/\[IMAGE:\s*(\d+)\]/g, (match, idxStr) => {
+          const idx = parseInt(idxStr, 10) - 1;
+          if (state.editorImages && state.editorImages[idx]) {
+            return `[IMAGE: ${state.editorImages[idx]}]`;
+          }
+          return match;
+        });
+        const rendered = buildSongBodyFromRawText(textWithFullImages, {
+          isRTL: el.formRtl ? el.formRtl.checked : false
+        });
+        el.editorPreviewDisplay.innerHTML = '';
+        el.editorPreviewDisplay.appendChild(rendered);
+      }
+    });
+  }
+
+  // Dashboard shortcuts
+  if (el.dashboardNewSetlistBtn) {
+    el.dashboardNewSetlistBtn.addEventListener('click', () => {
+      if (el.newSetlistBtn) el.newSetlistBtn.click();
+    });
+  }
+  if (el.dashboardImportSetlistBtn) {
+    el.dashboardImportSetlistBtn.addEventListener('click', () => {
+      if (el.mainImportSetlistBtn) el.mainImportSetlistBtn.click();
+    });
+  }
   if (el.formRtl) {
     el.formRtl.addEventListener('change', () => {
       updateFormTextDirection();
@@ -1677,26 +1828,48 @@ function bindEvents(db) {
       let serverSynced = false;
       try {
         showToast("Restoring selected database changes...");
-        const response = await fetch('/api/restore-backup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ songs: songsToRestore })
-        });
-
-        if (response.ok) {
+        if (dbFirestore && state.currentUser && !state.currentUser.isAnonymous) {
+          const batch = dbFirestore.batch();
+          for (let i = 0; i < songsToRestore.length; i += 400) {
+            const currentBatch = dbFirestore.batch();
+            const chunk = songsToRestore.slice(i, i + 400);
+            for (const s of chunk) {
+              const docRef = dbFirestore.collection('songs').doc(s.id);
+              s.ownerId = s.ownerId || state.currentUser.uid;
+              currentBatch.set(docRef, s);
+            }
+            await currentBatch.commit();
+          }
+          
           serverSynced = true;
           localStorage.removeItem('deletedSongIds');
-          showToast("Database restored successfully! Reloading...");
+          showToast("Database restored to Cloud successfully! Reloading...");
           setTimeout(() => {
             window.location.reload();
           }, 1500);
         } else {
-          const errText = await response.text();
-          console.error("Restore failed:", errText);
-          showToast("Failed to restore backup: " + errText);
+          const response = await fetch('/api/restore-backup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ songs: songsToRestore })
+          });
+
+          if (response.ok) {
+            serverSynced = true;
+            localStorage.removeItem('deletedSongIds');
+            showToast("Database restored successfully! Reloading...");
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
+          } else {
+            const errText = await response.text();
+            console.error("Restore failed:", errText);
+            showToast("Failed to restore backup: " + errText);
+          }
         }
       } catch (err) {
-        console.warn("Network or server error during restore, attempting local browser restore fallback:", err);
+        console.error("Error during restore:", err);
+        showToast("Restore encountered an error: " + err.message);
       }
 
       if (!serverSynced) {
@@ -2500,7 +2673,7 @@ function renderSongList() {
 
     // Create label tag for Language/RTL
     const langTag = song.isRTL ? '<span style="font-size: 0.7rem; background: var(--border-color); padding: 1px 4px; border-radius: 4px; color: var(--text-secondary);">עב</span>' : '';
-    const keyLabel = song.key ? `<span style="font-family: 'Roboto Mono', monospace; font-weight: bold;">${song.key}</span>` : '';
+    const keyLabel = song.key ? `<span style="font-family: 'JetBrains Mono', monospace; font-weight: bold;">${song.key}</span>` : '';
 
     item.innerHTML = `
       <span class="song-title">${escapeHTML(song.title)}</span>
@@ -2659,6 +2832,13 @@ function buildSongBodyFromRawText(rawText, options = {}) {
 
 // Active Song Renderer
 function renderActiveSong() {
+  // If active tab is setlists and no specific setlist is selected, show setlist dashboard instead of viewport
+  if (state.activeTab === 'setlists' && !state.activeSetlistId) {
+    showView('setlists-dashboard-view');
+    renderSetlistsDashboard();
+    return;
+  }
+
   el.songDisplayArea.innerHTML = '';
 
   if (!state.currentSongId) {
@@ -2668,8 +2848,11 @@ function renderActiveSong() {
         <p>Choose a song from the library or add a new one to begin.</p>
       </div>
     `;
+    showView('song-viewport');
     return;
   }
+
+  showView('song-viewport');
 
   let song = state.songs.find(s => s.id === state.currentSongId);
   if (!song) return;
@@ -2711,36 +2894,43 @@ function renderActiveSong() {
   const container = document.createElement('div');
   container.className = `song-container ${song.isRTL ? 'rtl' : ''}`;
 
-  // Floating Setlist Gig Navigation Bar
-  if (activeSetlist && state.activeSetlistSongIndex !== null) {
-    const navBar = document.createElement('div');
-    navBar.className = 'setlist-gig-nav';
+  // Floating Setlist Gig Navigation Bar (moved to #gig-nav-container)
+  const gigNavContainer = document.getElementById('gig-nav-container');
+  if (gigNavContainer) {
+    gigNavContainer.innerHTML = '';
+    if (activeSetlist && state.activeSetlistSongIndex !== null) {
+      gigNavContainer.style.display = 'block';
+      const navBar = document.createElement('div');
+      navBar.className = 'setlist-gig-nav';
 
-    const prevDisabled = state.activeSetlistSongIndex === 0 ? 'disabled' : '';
-    const nextDisabled = state.activeSetlistSongIndex === activeSetlist.songs.length - 1 ? 'disabled' : '';
+      const prevDisabled = state.activeSetlistSongIndex === 0 ? 'disabled' : '';
+      const nextDisabled = state.activeSetlistSongIndex === activeSetlist.songs.length - 1 ? 'disabled' : '';
 
-    navBar.innerHTML = `
-      <button class="btn gig-nav-btn" id="gig-prev-btn" ${prevDisabled}>← Prev</button>
-      <div class="gig-nav-info">
-        <span class="gig-setlist-name">${escapeHTML(activeSetlist.name)}</span>
-        <span class="gig-song-counter">Song ${state.activeSetlistSongIndex + 1} of ${activeSetlist.songs.length}</span>
-      </div>
-      <button class="btn gig-nav-btn" id="gig-next-btn" ${nextDisabled}>Next →</button>
-    `;
+      navBar.innerHTML = `
+        <button class="btn gig-nav-btn" id="gig-prev-btn" ${prevDisabled}>← Prev</button>
+        <div class="gig-nav-info">
+          <span class="gig-setlist-name">${escapeHTML(activeSetlist.name)}</span>
+          <span class="gig-song-counter">Song ${state.activeSetlistSongIndex + 1} of ${activeSetlist.songs.length}</span>
+        </div>
+        <button class="btn gig-nav-btn" id="gig-next-btn" ${nextDisabled}>Next →</button>
+      `;
 
-    container.appendChild(navBar);
+      gigNavContainer.appendChild(navBar);
 
-    navBar.querySelector('#gig-prev-btn').addEventListener('click', () => {
-      if (state.activeSetlistSongIndex > 0) {
-        navigateToSetlistSong(state.activeSetlistSongIndex - 1);
-      }
-    });
+      navBar.querySelector('#gig-prev-btn').addEventListener('click', () => {
+        if (state.activeSetlistSongIndex > 0) {
+          navigateToSetlistSong(state.activeSetlistSongIndex - 1);
+        }
+      });
 
-    navBar.querySelector('#gig-next-btn').addEventListener('click', () => {
-      if (state.activeSetlistSongIndex < activeSetlist.songs.length - 1) {
-        navigateToSetlistSong(state.activeSetlistSongIndex + 1);
-      }
-    });
+      navBar.querySelector('#gig-next-btn').addEventListener('click', () => {
+        if (state.activeSetlistSongIndex < activeSetlist.songs.length - 1) {
+          navigateToSetlistSong(state.activeSetlistSongIndex + 1);
+        }
+      });
+    } else {
+      gigNavContainer.style.display = 'none';
+    }
   }
 
   // Header details
@@ -2753,7 +2943,9 @@ function renderActiveSong() {
         </div>
         <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
           ${song.key ? `<button class="btn" style="flex: none; font-size: 0.8rem; padding: 4px 10px; font-weight: bold; background: var(--bg-secondary);">Orig: ${song.key}</button>` : ''}
+          ${(state.currentUser && !state.currentUser.isAnonymous) ? `
           <button class="btn" id="edit-active-btn" style="flex: none; font-size: 0.8rem; padding: 4px 10px;">Edit</button>
+          ` : ''}
         </div>
       </div>
       ${song.remarks ? `
@@ -2774,9 +2966,12 @@ function renderActiveSong() {
   el.songDisplayArea.appendChild(container);
 
   // Re-bind click handler on the newly rendered edit button
-  document.getElementById('edit-active-btn').addEventListener('click', () => {
-    openSongModal(song);
-  });
+  const editBtn = document.getElementById('edit-active-btn');
+  if (editBtn) {
+    editBtn.addEventListener('click', () => {
+      openSongModal(song);
+    });
+  }
 }
 
 // Auto-Scroll Loop
@@ -3139,6 +3334,22 @@ function openSongModal(song = null) {
 
   if (el.formImportFile) el.formImportFile.value = '';
   if (el.importStatus) el.importStatus.textContent = '';
+
+  // Reset editor preview state to text edit mode
+  if (el.editorPreviewDisplay) el.editorPreviewDisplay.style.display = 'none';
+  if (el.formText) el.formText.style.display = 'block';
+  if (el.editorPreviewToggleBtn) {
+    const iconSpan = el.editorPreviewToggleBtn.querySelector('span');
+    if (iconSpan) iconSpan.textContent = 'visibility';
+    el.editorPreviewToggleBtn.title = 'Preview Mode';
+  }
+  
+  // Sync theme toggle icon
+  const editorThemeToggleBtn = document.getElementById('editor-theme-toggle-btn');
+  if (editorThemeToggleBtn) {
+    const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+    editorThemeToggleBtn.textContent = currentTheme === 'light' ? 'light_mode' : 'dark_mode';
+  }
   
   // Initialize/Reset temporary image store
   state.editorImages = [];
@@ -3188,12 +3399,21 @@ function openSongModal(song = null) {
 
   updateFormTextDirection();
 
-  el.songModal.classList.add('active');
+  showView('song-editor-view');
   el.formTitle.focus();
 }
 
 function closeSongModal() {
-  el.songModal.classList.remove('active');
+  if (state.activeTab === 'setlists' && !state.activeSetlistId) {
+    showView('setlists-dashboard-view');
+    renderSetlistsDashboard();
+  } else if (state.activeTab === 'setlists' && state.activeSetlistId) {
+    showView('song-viewport');
+    renderActiveSong();
+  } else {
+    showView('song-viewport');
+    renderActiveSong();
+  }
 }
 
 function updateFormTextDirection() {
@@ -3288,6 +3508,8 @@ function renderSidebar() {
       el.setlistsFooter.style.display = 'flex';
       el.setlistEditor.style.display = 'none';
       renderSetlistsList();
+      showView('setlists-dashboard-view');
+      renderSetlistsDashboard();
     }
   }
 }
@@ -3772,3 +3994,213 @@ function triggerHTMLDownload(updatedSongs) {
 
 // Boot up
 window.addEventListener('DOMContentLoaded', init);
+
+// ==========================================
+// VIEW MANAGER & SETLIST DASHBOARD FUNCTIONS
+// ==========================================
+function showView(viewId) {
+  const views = {
+    'song-viewport': document.getElementById('song-viewport'),
+    'setlists-dashboard-view': document.getElementById('setlists-dashboard-view'),
+    'song-editor-view': document.getElementById('song-editor-view')
+  };
+
+  for (const [id, element] of Object.entries(views)) {
+    if (element) {
+      element.style.display = id === viewId ? 'block' : 'none';
+    }
+  }
+
+  // Toggle main toolbar visibility based on active view (only show when viewing songs)
+  if (el.mainToolbar) {
+    el.mainToolbar.style.display = (viewId === 'song-viewport') ? 'flex' : 'none';
+  }
+}
+
+function renderSetlistsDashboard() {
+  const gridContainer = document.getElementById('dashboard-setlists-grid');
+  if (!gridContainer) return;
+
+  gridContainer.innerHTML = '';
+
+  // Update Stats
+  const totalSetsEl = document.getElementById('stats-total-sets');
+  const totalSongsEl = document.getElementById('stats-total-songs');
+  const sharedSetsEl = document.getElementById('stats-shared-sets');
+
+  if (totalSetsEl) totalSetsEl.textContent = state.setlists.length;
+  if (totalSongsEl) totalSongsEl.textContent = state.songs.length;
+  if (sharedSetsEl) {
+    const sharedCount = state.setlists.filter(s => s.isShared).length;
+    sharedSetsEl.textContent = sharedCount;
+  }
+
+  // Render Setlists Cards
+  state.setlists.forEach(setlist => {
+    const card = document.createElement('div');
+    card.className = 'bento-card';
+    
+    // Choose icon based on setlist name
+    let iconName = 'music_note';
+    const nameLower = setlist.name.toLowerCase();
+    if (nameLower.includes('acoustic') || nameLower.includes('solo') || nameLower.includes('unplugged') || nameLower.includes('mic')) {
+      iconName = 'mic';
+    } else if (nameLower.includes('wedding') || nameLower.includes('celebration') || nameLower.includes('party') || nameLower.includes('gig')) {
+      iconName = 'celebration';
+    } else if (nameLower.includes('jazz') || nameLower.includes('piano') || nameLower.includes('blues')) {
+      iconName = 'piano';
+    } else if (nameLower.includes('guitar') || nameLower.includes('rock')) {
+      iconName = 'album';
+    }
+
+    // Dynamic description from song titles
+    let desc = 'Empty setlist. Add songs to get started.';
+    if (setlist.songs && setlist.songs.length > 0) {
+      desc = setlist.songs.slice(0, 3).map(s => s.title).join(', ');
+      if (setlist.songs.length > 3) {
+        desc += ` and ${setlist.songs.length - 3} more`;
+      }
+    }
+
+    const privacyBadge = setlist.isShared 
+      ? '<span class="bento-card-badge">Public</span>' 
+      : '<span class="bento-card-badge private">Private</span>';
+
+    const countLabel = setlist.songs.length === 1 ? '1 Song' : `${setlist.songs.length} Songs`;
+
+    card.innerHTML = `
+      <div class="bento-card-header">
+        <div class="bento-card-icon">
+          <span class="material-symbols-outlined">${iconName}</span>
+        </div>
+        ${privacyBadge}
+      </div>
+      <div class="bento-card-body">
+        <h4 class="bento-card-title">${escapeHTML(setlist.name)}</h4>
+        <p class="bento-card-desc">${escapeHTML(desc)}</p>
+      </div>
+      <div class="bento-card-footer">
+        <div class="bento-card-meta">
+          <span class="material-symbols-outlined">list_alt</span>
+          <span>${countLabel}</span>
+        </div>
+        <div class="bento-card-actions">
+          ${(state.currentUser && !state.currentUser.isAnonymous) ? `
+          <button class="bento-card-action-btn toggle-privacy" title="${setlist.isShared ? 'Make Private' : 'Make Public'}">
+            <span class="material-symbols-outlined" style="font-size: 16px;">
+              ${setlist.isShared ? 'lock_open' : 'lock'}
+            </span>
+          </button>
+          ` : ''}
+          <button class="bento-card-action-btn export-setlist" title="Export Setlist">
+            <span class="material-symbols-outlined" style="font-size: 16px;">download</span>
+          </button>
+          <button class="bento-card-action-btn delete remove-setlist" title="Delete Setlist">
+            <span class="material-symbols-outlined" style="font-size: 16px;">delete</span>
+          </button>
+        </div>
+      </div>
+    `;
+
+    // Click handler for card - open setlist editor
+    card.addEventListener('click', () => {
+      state.activeSetlistId = setlist.id;
+      state.activeSetlistSongIndex = null;
+      state.activeTab = 'setlists';
+      renderSidebar();
+      
+      // If the setlist has songs, open the first song, else stay on dashboard or open empty view
+      if (setlist.songs && setlist.songs.length > 0) {
+        const firstSong = setlist.songs[0];
+        // Find if this song exists in our library
+        const libSong = state.songs.find(s => s.id === firstSong.id || s.title === firstSong.title);
+        if (libSong) {
+          state.currentSongId = libSong.id;
+          state.activeSetlistSongIndex = 0;
+          state.transposeOffset = firstSong.transposeOffset || 0;
+          if (el.transposeVal) {
+            const sign = state.transposeOffset > 0 ? '+' : '';
+            el.transposeVal.textContent = `${sign}${state.transposeOffset}`;
+          }
+          renderSongList();
+          renderActiveSong();
+          showView('song-viewport');
+        } else {
+          showToast("Song not found in library.");
+        }
+      } else {
+        // Empty setlist: show dashboard but editor in sidebar is open
+        renderSongList();
+        renderActiveSong();
+      }
+    });
+
+    // Stop propagation and bind action buttons
+    const privacyBtn = card.querySelector('.toggle-privacy');
+    if (privacyBtn) {
+      privacyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        setlist.isShared = !setlist.isShared;
+        try {
+          if (db) await dbPutSetlist(db, setlist);
+          renderSidebar();
+          renderSetlistsDashboard();
+        } catch (err) {
+          console.error(err);
+        }
+      });
+    }
+
+    const exportBtn = card.querySelector('.export-setlist');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportSetlistToFile(setlist);
+      });
+    }
+
+    const deleteBtn = card.querySelector('.remove-setlist');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (confirm(`Are you sure you want to delete the setlist "${setlist.name}" permanently?`)) {
+          try {
+            if (db) {
+              await dbDeleteSetlist(db, setlist.id);
+            }
+            state.setlists = state.setlists.filter(s => s.id !== setlist.id);
+            if (state.activeSetlistId === setlist.id) {
+              state.activeSetlistId = null;
+              state.activeSetlistSongIndex = null;
+            }
+            showToast("Setlist deleted.");
+            renderToolbarSetlistSelect();
+            renderSidebar();
+            renderSetlistsDashboard();
+          } catch (err) {
+            console.error(err);
+            showToast("Failed to delete setlist.");
+          }
+        }
+      });
+    }
+
+    gridContainer.appendChild(card);
+  });
+
+  // Append Create New Placeholder Card
+  if (state.currentUser && !state.currentUser.isAnonymous) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'bento-card placeholder';
+    placeholder.innerHTML = `
+      <div class="bento-card-placeholder-icon">
+        <span class="material-symbols-outlined" style="font-size: 24px;">add</span>
+      </div>
+      <span class="bento-card-placeholder-text">New Performance Set</span>
+    `;
+    placeholder.addEventListener('click', () => {
+      if (el.newSetlistBtn) el.newSetlistBtn.click();
+    });
+    gridContainer.appendChild(placeholder);
+  }
+}

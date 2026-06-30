@@ -44,3 +44,5 @@ scripts/manual_edits.json
 
 # Built outputs
 outputs/
+*.keystore
+
