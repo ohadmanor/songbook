@@ -157,6 +157,7 @@ const el = {
   cancelModalBtn: document.getElementById('cancel-modal-btn'),
   saveSongBtn: document.getElementById('save-song-btn'),
   deleteSongBtn: document.getElementById('delete-song-btn'),
+  deleteSongBtnText: document.getElementById('delete-song-btn-text'),
   modalTitle: document.getElementById('modal-title'),
   editSongId: document.getElementById('edit-song-id'),
   formTitle: document.getElementById('form-title'),
@@ -168,6 +169,7 @@ const el = {
   formRemarks: document.getElementById('form-remarks'),
   importDocxGroup: document.getElementById('import-docx-group'),
   formImportFile: document.getElementById('form-import-file'),
+  formImportJson: document.getElementById('form-import-json'),
   importStatus: document.getElementById('import-status'),
   mainToolbar: document.getElementById('main-toolbar'),
   editorBackBtn: document.getElementById('editor-back-btn'),
@@ -1342,6 +1344,27 @@ function bindEvents(db) {
     const id = el.editSongId.value;
     if (!id) return;
 
+    const isSetlistEdit = !!(state.activeSetlistId && state.activeSetlistSongIndex !== null);
+    if (isSetlistEdit) {
+      if (confirm("Are you sure you want to remove this song from the setlist?")) {
+        const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
+        if (setlist && setlist.songs[state.activeSetlistSongIndex]) {
+          setlist.songs.splice(state.activeSetlistSongIndex, 1);
+          try {
+            if (db) await dbPutSetlist(db, setlist);
+            showToast("Song removed from setlist.");
+            closeSongModal();
+            renderSetlistEditor();
+            if (state.currentSongId) renderActiveSong();
+          } catch (e) {
+            console.error(e);
+            showToast("Failed to remove song from setlist.");
+          }
+        }
+      }
+      return;
+    }
+
     if (confirm("Are you sure you want to delete this song permanently?")) {
       if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
         try {
@@ -1940,7 +1963,7 @@ function bindEvents(db) {
       const file = e.target.files[0];
       if (!file) return;
 
-      el.importStatus.textContent = "Processing...";
+      if (el.importStatus) el.importStatus.textContent = "Processing...";
 
       try {
         const result = await parseDocxFile(file);
@@ -1951,13 +1974,68 @@ function bindEvents(db) {
         el.formRtl.checked = result.isRTL;
         updateFormTextDirection();
 
-        el.importStatus.textContent = "Imported successfully!";
+        if (el.importStatus) el.importStatus.textContent = "Imported successfully!";
         showToast("Word document converted.");
+        
+        // Reset file input so same file can be loaded again if needed
+        e.target.value = '';
+        setTimeout(() => {
+          if (el.importStatus) el.importStatus.textContent = "";
+        }, 3000);
       } catch (err) {
         console.error(err);
-        el.importStatus.textContent = "Import failed.";
+        if (el.importStatus) el.importStatus.textContent = "Import failed.";
         showToast("Failed to parse Word file.");
+        
+        e.target.value = '';
+        setTimeout(() => {
+          if (el.importStatus) el.importStatus.textContent = "";
+        }, 3000);
       }
+    });
+  }
+
+  // JSON Import listener
+  if (el.formImportJson) {
+    el.formImportJson.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const songData = JSON.parse(evt.target.result);
+          el.formTitle.value = songData.title || "";
+          el.formArtist.value = songData.artist || "";
+          el.formKey.value = songData.key || "";
+          if (el.formRtl) el.formRtl.checked = !!songData.isRTL;
+          el.formText.value = songData.rawText || "";
+          if (songData.remarks && el.formRemarks) el.formRemarks.value = songData.remarks;
+          
+          updateFormTextDirection();
+          
+          if (el.importStatus) el.importStatus.textContent = "JSON Import successful!";
+          showToast("JSON song imported.");
+        } catch (err) {
+          console.error("Failed to parse JSON file:", err);
+          if (el.importStatus) el.importStatus.textContent = "Error parsing JSON.";
+          showToast("Failed to parse JSON file.");
+        }
+        
+        e.target.value = '';
+        setTimeout(() => {
+          if (el.importStatus) el.importStatus.textContent = "";
+        }, 3000);
+      };
+      
+      reader.onerror = () => {
+        console.error("Failed to read JSON file");
+        if (el.importStatus) el.importStatus.textContent = "Error reading JSON.";
+        showToast("Failed to read JSON file.");
+        e.target.value = '';
+      };
+      
+      reader.readAsText(file);
     });
   }
 
@@ -3433,7 +3511,13 @@ function openSongModal(song = null) {
     if (el.formRemarks) {
       el.formRemarks.value = song.remarks || '';
     }
-    el.deleteSongBtn.style.display = isSetlistEdit ? 'none' : 'block';
+    
+    // Always show the delete button when editing an existing song, but change text/icon
+    el.deleteSongBtn.style.display = 'flex';
+    if (el.deleteSongBtnText) {
+      el.deleteSongBtnText.textContent = isSetlistEdit ? "Remove from Setlist" : "Delete Song";
+    }
+
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'none';
   } else {
     // New song mode

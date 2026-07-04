@@ -1,4 +1,4 @@
-window.defaultSongsVersion = '2026-06-29T21:32:22.375814';
+window.defaultSongsVersion = '2026-07-04T19:10:15.981371';
 window.defaultSongs = [
   {
     "id": "song_2",
@@ -14574,5 +14574,13 @@ window.defaultSongs = [
     "isRTL": true,
     "rawText": "פתיחה : Dm Gm A \n \n Dm\nאני לא אהוד בנאי \n C\nאני לא גידי גוב \n Gm\nאני לא שלמה ארצי \n Am\nאפילו לא קרוב \n \n Dm\nאני לא אריקאיינשטיין \n C\nאני לא שלום חנוך \n Gm\nאני לא שלמה גרוניך \n Am\nולא יוני בלוך \n \n          Dm\nאבל אני שר \n A     Gm      Am\nמהלב  מהלב  מהלב \n          Dm\nאבל אני שר \n A     Gm      Am\nמהלב  מהלב  מהלב \n \n Dm\nאני לא דודו טסה \n C\nאני לא אהוד מנור \n Gm\nבטח לא סמיר שוקרי \n Am\nאף פעם לא ניגנתי בכינור \n \n Dm\nאני לא עמיר בניון \n C\nאין לי כזה מנעד \n Gm\nאני לא שירי גבסו או נינט \n Am\nלא אף פעם לא הייתי בכוכב נולד \n \n     \n \n          Dm\nאבל אני שר \n A     Gm      Am\nמהלב  מהלב  מהלב \n          Dm\nאבל אני שר \n A     Gm      Am\nמהלב  מהלב  מהלב \n \n C         Dm\nאני לא דני רובס (איך הוא שר \n Dm               A\nאני לא דני ליטני (לא אין לו יחס חם \n C         Dm\nאני לא דני סנדרסון (אין לו דודה ולא דוד \n Bb                   A\nאני לא יכולה בלעדיך \n \n             Ebm\nתתנו לו צ'אנס \n Bbm            \nהוא שר מהלב \n Bb     G#m\nמהלב  מהלב \n \n             Ebm\nתתנו לו צ'אנס \n Bbm            \nהוא שר מהלב \n Bb     G#m\nמהלב  מהלב \n \n             Ebm\nתתנו לו צ'אנס \n Bbm            \nהוא שר מהלב \n Bb                      G#m\nהוא רוצה לאמא  (מהלב) \n Bbm                          Ebm\nהוא רוצה לאמא   (הוא מהלב) \n Bb                        G#m\nהוא רוצה לאמא  (הוא מהלב) \n Bm               \nהוא רוצה לאמא \n \nסיום:Ebm Bb G#m Bbm ",
     "id": "song_1812"
+  },
+  {
+    "id": "custom_1783181415264",
+    "title": "Die With A Smile (Official Music Video)",
+    "artist": "Lady Gaga, Bruno Mars",
+    "key": "Am",
+    "isRTL": false,
+    "rawText": "Am\nI want to be next to you\nC\nIf the world was ending"
   }
 ];
