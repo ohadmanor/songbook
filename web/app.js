@@ -172,7 +172,10 @@ const el = {
   mainToolbar: document.getElementById('main-toolbar'),
   editorBackBtn: document.getElementById('editor-back-btn'),
   editorPreviewToggleBtn: document.getElementById('editor-preview-toggle-btn'),
-  editorFormatChordsBtn: document.getElementById('editor-format-chords-btn'),
+  editorBoldBtn: document.getElementById('editor-format-bold-btn'),
+  editorHighlightGreenBtn: document.getElementById('editor-format-green-btn'),
+  editorHighlightBtn: document.getElementById('editor-format-yellow-btn'),
+  saveSongBtnText: document.getElementById('save-song-btn-text'),
   editorPreviewDisplay: document.getElementById('editor-preview-display'),
   exportDbBtn: document.getElementById('export-db-btn'),
   restoreBackupBtn: document.getElementById('restore-backup-btn'),
@@ -1046,36 +1049,11 @@ function bindEvents(db) {
         
         // Hide editor textarea, show preview container
         el.formText.style.display = 'none';
+        el.editorPreviewDisplay.className = `editor-textarea-preview-display song-container ${el.formRtl && el.formRtl.checked ? 'rtl' : ''}`;
         el.editorPreviewDisplay.style.display = 'block';
         const span = el.editorPreviewToggleBtn.querySelector('span');
         if (span) span.textContent = 'edit';
         el.editorPreviewToggleBtn.title = 'Edit Mode';
-      }
-    });
-  }
-
-  if (el.editorFormatChordsBtn && el.formText) {
-    el.editorFormatChordsBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const originalText = el.formText.value || '';
-      const formatted = originalText.split('\n').map(line => line.trimEnd()).join('\n');
-      el.formText.value = formatted;
-      showToast("Chords formatted (trailing whitespace trimmed).");
-      
-      // If we are currently in preview mode, refresh the preview
-      if (el.editorPreviewDisplay.style.display !== 'none') {
-        const textWithFullImages = formatted.replace(/\[IMAGE:\s*(\d+)\]/g, (match, idxStr) => {
-          const idx = parseInt(idxStr, 10) - 1;
-          if (state.editorImages && state.editorImages[idx]) {
-            return `[IMAGE: ${state.editorImages[idx]}]`;
-          }
-          return match;
-        });
-        const rendered = buildSongBodyFromRawText(textWithFullImages, {
-          isRTL: el.formRtl ? el.formRtl.checked : false
-        });
-        el.editorPreviewDisplay.innerHTML = '';
-        el.editorPreviewDisplay.appendChild(rendered);
       }
     });
   }
@@ -1098,42 +1076,83 @@ function bindEvents(db) {
   }
 
   // Editor formatting toolbar selection wrapping helper
-  const wrapTextSelection = (tagOpen, tagClose) => {
+  const wrapTextSelection = (tag) => {
     const textarea = el.formText;
     if (!textarea) return;
 
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-    const selectedText = text.substring(start, end);
+    let start = textarea.selectionStart;
+    let end = textarea.selectionEnd;
+    let fullText = textarea.value;
+
+    // 1. Expand selection if immediately bounded by known tags
+    let expanded = true;
+    while(expanded) {
+      expanded = false;
+      const tLen = 2;
+      
+      const before = start >= tLen ? fullText.substring(start - tLen, start) : '';
+      const after = end <= fullText.length - tLen ? fullText.substring(end, end + tLen) : '';
+      
+      for (const t of ['**', '==', '%%']) {
+        if (before === t && after === t) {
+          start -= tLen;
+          end += tLen;
+          expanded = true;
+          break;
+        }
+      }
+    }
+
+    let selectedText = fullText.substring(start, end);
+
+    // 2. Check if we are toggling OFF the exact requested tag
+    const strippedSelected = selectedText.trim();
+    const isTogglingOff = strippedSelected.startsWith(tag) && strippedSelected.endsWith(tag) && strippedSelected.length >= tag.length * 2;
+
+    // 3. Clean all formatting tags from the text to prevent nesting
+    const cleanText = selectedText.replace(/\*\*|==|%%/g, '');
+
+    // 4. Extract spaces from the cleaned text so we put tags INSIDE the spaces
+    const leadingSpacesMatch = cleanText.match(/^\s*/);
+    const trailingSpacesMatch = cleanText.match(/\s*$/);
+    const leadingSpaces = leadingSpacesMatch ? leadingSpacesMatch[0] : '';
+    const trailingSpaces = trailingSpacesMatch ? trailingSpacesMatch[0] : '';
     
-    const replacement = tagOpen + selectedText + tagClose;
-    textarea.value = text.substring(0, start) + replacement + text.substring(end);
-    
-    // Restore focus and selection
+    let coreText = cleanText.substring(leadingSpaces.length, cleanText.length - trailingSpaces.length);
+
+    let replacementCore = coreText;
+    if (!isTogglingOff) {
+      if (coreText.length > 0) {
+        replacementCore = tag + coreText + tag;
+      } else {
+        replacementCore = tag + tag;
+      }
+    }
+
+    const replacement = leadingSpaces + replacementCore + trailingSpaces;
+
     textarea.focus();
-    textarea.selectionStart = start;
-    textarea.selectionEnd = start + replacement.length;
+    textarea.setRangeText(replacement, start, end, 'select');
   };
 
   if (el.editorBoldBtn) {
     el.editorBoldBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      wrapTextSelection('**', '**');
+      wrapTextSelection('**');
     });
   }
 
   if (el.editorHighlightBtn) {
     el.editorHighlightBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      wrapTextSelection('==', '==');
+      wrapTextSelection('==');
     });
   }
 
   if (el.editorHighlightGreenBtn) {
     el.editorHighlightGreenBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      wrapTextSelection('%%', '%%');
+      wrapTextSelection('%%');
     });
   }
 
@@ -1316,6 +1335,7 @@ function bindEvents(db) {
       }
     }
   });
+
 
   // Delete Song Button
   el.deleteSongBtn.addEventListener('click', async () => {
@@ -2716,6 +2736,15 @@ function renderSongList() {
   });
 }
 
+// Format chord line HTML without escaping to preserve generated spans
+function formatChordLineHtml(html) {
+  if (!html) return '';
+  return html
+    .replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/==([\s\S]*?)==/g, '<mark class="song-highlight">$1</mark>')
+    .replace(/%%([\s\S]*?)%%/g, '<mark class="song-highlight-green">$1</mark>');
+}
+
 function buildSongBodyFromRawText(rawText, options = {}) {
   const resolveImageSrc = typeof options.resolveImageSrc === 'function'
     ? options.resolveImageSrc
@@ -2768,15 +2797,22 @@ function buildSongBodyFromRawText(rawText, options = {}) {
               const startIdx = chord.index;
               htmlResult += escapeHTML(rawChordLine.substring(lastIdx, startIdx));
 
-              const transposed = window.Transposer.transposeChord(chord.text, state.transposeOffset, state.preferFlats);
+              const prefixMatch = chord.text.match(/^[%=\*]+/);
+              const suffixMatch = chord.text.match(/[%=\*]+$/);
+              const prefix = prefixMatch ? prefixMatch[0] : '';
+              const suffix = suffixMatch ? suffixMatch[0] : '';
+              
+              const coreChord = chord.text.replace(/[%=\*]/g, '');
+
+              const transposed = window.Transposer.transposeChord(coreChord, state.transposeOffset, state.preferFlats);
               const cleanDisplay = cleanChordNameForDisplay(transposed);
 
-              htmlResult += `<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>`;
+              htmlResult += `${prefix}<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>${suffix}`;
               lastIdx = startIdx + chord.text.length;
             });
 
             htmlResult += escapeHTML(rawChordLine.substring(lastIdx));
-            chordDiv.innerHTML = htmlResult;
+            chordDiv.innerHTML = formatChordLineHtml(htmlResult);
           }
 
           const lyricDiv = document.createElement('div');
@@ -2801,18 +2837,25 @@ function buildSongBodyFromRawText(rawText, options = {}) {
               // Append text/spaces before this chord
               htmlResult += escapeHTML(rawLine.substring(lastIdx, startIdx));
 
+              const prefixMatch = chord.text.match(/^[%=\*]+/);
+              const suffixMatch = chord.text.match(/[%=\*]+$/);
+              const prefix = prefixMatch ? prefixMatch[0] : '';
+              const suffix = suffixMatch ? suffixMatch[0] : '';
+              
+              const coreChord = chord.text.replace(/[%=\*]/g, '');
+
               // Transpose and clean
-              const transposed = window.Transposer.transposeChord(chord.text, state.transposeOffset, state.preferFlats);
+              const transposed = window.Transposer.transposeChord(coreChord, state.transposeOffset, state.preferFlats);
               const cleanDisplay = cleanChordNameForDisplay(transposed);
 
               // Render chord in-flow
-              htmlResult += `<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>`;
+              htmlResult += `${prefix}<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>${suffix}`;
               lastIdx = startIdx + chord.text.length;
             });
 
             // Append trailing characters
             htmlResult += escapeHTML(rawLine.substring(lastIdx));
-            lineDiv.innerHTML = htmlResult;
+            lineDiv.innerHTML = formatChordLineHtml(htmlResult);
           }
         } else {
           // Plain lyrics
@@ -3362,6 +3405,12 @@ function openSongModal(song = null) {
   if (song) {
     // Editing mode
     el.modalTitle.textContent = isSetlistEdit ? "Edit Song in Setlist" : "Edit Song";
+    
+    // Update button text and secondary button visibility
+    if (el.saveSongBtnText) {
+      el.saveSongBtnText.textContent = isSetlistEdit ? "Save to Setlist" : "Save Song";
+    }
+
     el.editSongId.value = song.id;
     el.formTitle.value = song.title;
     el.formArtist.value = song.artist === 'Unknown Artist' ? '' : song.artist;
@@ -3389,6 +3438,9 @@ function openSongModal(song = null) {
   } else {
     // New song mode
     el.modalTitle.textContent = "Add New Song";
+    if (el.saveSongBtnText) {
+      el.saveSongBtnText.textContent = "Save Song";
+    }
     el.deleteSongBtn.style.display = 'none';
     if (formShare) formShare.checked = false;
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'block';

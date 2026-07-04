@@ -34,7 +34,7 @@ function getCharWidth(c) {
  * @returns {boolean}
  */
 function isValidChordToken(token) {
-  const clean = token.replace(/[()\[\]*~]/g, '').trim();
+  const clean = token.replace(/[()\[\]*~%=]/g, '').trim();
   if (clean === '') return false;
   
   // Check if it's a known symbol, including repeat indicators (e.g. x2, X4, //x2, 2x) or common instrumental words
