@@ -16,10 +16,21 @@ const firebaseConfig = {
 
 let dbFirestore = null;
 if (typeof firebase !== 'undefined') {
+  // Suppress the harmless deprecation warning about enableIndexedDbPersistence
+  // Must intercept before firebase.firestore() captures the reference
+  const _origWarn = console.warn.bind(console);
+  console.warn = function(...args) {
+    const msg = typeof args[0] === 'string' ? args[0] : (args[1] && typeof args[1] === 'string' ? args[1] : '');
+    if (msg.includes('enableIndexedDbPersistence() will be deprecated')) return;
+    _origWarn.apply(console, args);
+  };
+
   firebase.initializeApp(firebaseConfig);
   dbFirestore = firebase.firestore();
   dbFirestore.enablePersistence().catch((err) => {
-    console.warn("Firestore persistence error:", err);
+    if (err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
+      console.warn("Firestore persistence error:", err);
+    }
   });
 }
 
@@ -685,18 +696,36 @@ function startRealtimeSync() {
       renderSidebar();
     });
   } else {
-    unsubscribeSetlists = dbFirestore.collection('setlists').onSnapshot((snapshot) => {
-      let setlists = [];
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        if (data.isShared || data.ownerId === uid) {
-          setlists.push(data);
-        }
-      });
-      state.setlists = setlists;
+    const setlistsRef = dbFirestore.collection('setlists');
+    
+    let ownedSetlists = [];
+    let sharedSetlists = [];
+    
+    const updateState = () => {
+      const map = new Map();
+      ownedSetlists.forEach(s => map.set(s.id, s));
+      sharedSetlists.forEach(s => map.set(s.id, s));
+      state.setlists = Array.from(map.values());
       renderToolbarSetlistSelect();
       renderSidebar();
-    });
+    };
+
+    const unsubOwned = setlistsRef.where('ownerId', '==', uid).onSnapshot((snap) => {
+      ownedSetlists = [];
+      snap.forEach(doc => ownedSetlists.push(doc.data()));
+      updateState();
+    }, (err) => console.error("Owned setlists sync error:", err));
+    
+    const unsubShared = setlistsRef.where('isShared', '==', true).onSnapshot((snap) => {
+      sharedSetlists = [];
+      snap.forEach(doc => sharedSetlists.push(doc.data()));
+      updateState();
+    }, (err) => console.error("Shared setlists sync error:", err));
+
+    unsubscribeSetlists = () => {
+      unsubOwned();
+      unsubShared();
+    };
   }
 }
 
@@ -1266,7 +1295,6 @@ function bindEvents(db) {
 
     if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
       song.ownerId = originalSong ? (originalSong.ownerId || state.currentUser.uid) : state.currentUser.uid;
-      song.isShared = formShare ? formShare.checked : false;
       try {
         await dbFirestore.collection('songs').doc(id).set(song);
         showToast("Song saved to cloud.");
@@ -1366,31 +1394,28 @@ function bindEvents(db) {
     }
 
     if (confirm("Are you sure you want to delete this song permanently?")) {
-      if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
+      const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+      let cloudSuccess = false;
+
+      if (state.currentUser && state.currentUser.email === 'ohad.manor@gmail.com' && typeof dbFirestore !== 'undefined' && dbFirestore) {
         try {
-          if (!id.startsWith('custom_')) {
-            // It's a default song. Set tombstone in Firestore.
-            await dbFirestore.collection('songs').doc(id).set({
-              id,
-              deleted: true,
-              ownerId: state.currentUser.uid
-            });
-            
-            // Also store in local deletedSongIds so we know it's deleted locally
-            let deletedSongIds = [];
-            try {
-              deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
-            } catch (e) {}
-            if (!deletedSongIds.includes(id)) {
-              deletedSongIds.push(id);
-              localStorage.setItem('deletedSongIds', JSON.stringify(deletedSongIds));
-            }
-          } else {
-            // It's a custom song. Delete from Firestore.
-            await dbFirestore.collection('songs').doc(id).delete();
+          // Mark the song as deleted in Firestore (works for both default and custom songs)
+          await dbFirestore.collection('songs').doc(id).set({
+            id,
+            deleted: true,
+            ownerId: state.currentUser.uid
+          });
+          
+          // Also track in localStorage so it stays deleted even offline
+          let deletedSongIds = [];
+          try {
+            deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
+          } catch (e) {}
+          if (!deletedSongIds.includes(id)) {
+            deletedSongIds.push(id);
+            localStorage.setItem('deletedSongIds', JSON.stringify(deletedSongIds));
           }
 
-          // Also delete from IndexedDB in case it exists locally
           if (db) {
             try {
               await dbDeleteSong(db, id);
@@ -1400,8 +1425,8 @@ function bindEvents(db) {
           }
 
           showToast("Song deleted from cloud.");
+          cloudSuccess = true;
 
-          // Update local state and refresh UI immediately
           state.songs = state.songs.filter(s => s.id !== id);
           state.filteredSongs = state.filteredSongs.filter(s => s.id !== id);
 
@@ -1419,13 +1444,13 @@ function bindEvents(db) {
           renderActiveSong();
           closeSongModal();
         } catch (err) {
-          console.error(err);
-          showToast("Failed to delete from cloud.");
+          console.error("Cloud delete failed:", err);
+          showToast("Cloud delete failed: " + (err.message || err.code || 'unknown error'));
         }
-      } else {
-        const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+      } 
+      
+      if (!cloudSuccess) {
         if (isLocalOrDev) {
-          // If default song, add to deleted default list in localStorage
           if (!id.startsWith('custom_')) {
             let deletedSongIds = [];
             try {
@@ -1437,7 +1462,6 @@ function bindEvents(db) {
             }
           }
 
-          // Delete from IndexedDB
           if (db) {
             try {
               await dbDeleteSong(db, id);
@@ -1446,7 +1470,6 @@ function bindEvents(db) {
             }
           }
 
-          // If running on local dev server, call delete-song API
           if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
             try {
               const response = await fetch('/api/delete-song', {
@@ -1464,7 +1487,6 @@ function bindEvents(db) {
             showToast("Song deleted locally.");
           }
 
-          // Update local state and refresh UI immediately
           state.songs = state.songs.filter(s => s.id !== id);
           state.filteredSongs = state.filteredSongs.filter(s => s.id !== id);
 
@@ -1482,7 +1504,7 @@ function bindEvents(db) {
           renderActiveSong();
           closeSongModal();
         } else {
-          showToast("Guests cannot delete songs.");
+          showToast("Only ohad.manor@gmail.com can delete songs.");
         }
       }
     }
@@ -3494,7 +3516,6 @@ function openSongModal(song = null) {
     el.formArtist.value = song.artist === 'Unknown Artist' ? '' : song.artist;
     el.formKey.value = song.key || '';
     el.formRtl.checked = song.isRTL;
-    if (formShare) formShare.checked = song.isShared || false;
     
     // Parse rawText to extract full image sources and replace them with short placeholders
     let rawText = song.rawText || '';
@@ -3512,8 +3533,12 @@ function openSongModal(song = null) {
       el.formRemarks.value = song.remarks || '';
     }
     
-    // Always show the delete button when editing an existing song, but change text/icon
-    el.deleteSongBtn.style.display = 'flex';
+    const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+    if (isSetlistEdit || (state.currentUser && state.currentUser.email === 'ohad.manor@gmail.com') || isLocalOrDev) {
+      el.deleteSongBtn.style.display = 'flex';
+    } else {
+      el.deleteSongBtn.style.display = 'none';
+    }
     if (el.deleteSongBtnText) {
       el.deleteSongBtnText.textContent = isSetlistEdit ? "Remove from Setlist" : "Delete Song";
     }
@@ -3526,7 +3551,6 @@ function openSongModal(song = null) {
       el.saveSongBtnText.textContent = "Save Song";
     }
     el.deleteSongBtn.style.display = 'none';
-    if (formShare) formShare.checked = false;
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'block';
   }
 
@@ -3682,7 +3706,7 @@ function renderSetlistsList() {
         </div>
       </div>
       <div style="display: flex; gap: 0.2rem; align-items: center; flex-shrink: 0;">
-        ${(state.currentUser && !state.currentUser.isAnonymous) ? `
+        ${(state.currentUser && !state.currentUser.isAnonymous && setlist.ownerId === state.currentUser.uid) ? `
         <button class="toggle-privacy-btn" title="${setlist.isShared ? 'Public - Click to make Private' : 'Private - Click to make Public'}" style="color: ${setlist.isShared ? 'var(--accent-color)' : 'var(--text-secondary)'}; border: none; background: transparent; width: 28px; height: 28px; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s, transform 0.15s ease; border-radius: 4px;">
           ${setlist.isShared ? `
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -3767,10 +3791,13 @@ function renderSetlistEditor() {
   const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
   if (!setlist) return;
 
+  const isOwner = state.currentUser && !state.currentUser.isAnonymous && setlist.ownerId === state.currentUser.uid;
+
   el.setlistNameInput.value = setlist.name;
+  el.setlistNameInput.disabled = !isOwner;
   if (setlistShareCheckbox) setlistShareCheckbox.checked = setlist.isShared || false;
   if (shareSetlistGroup) {
-    if (state.currentUser && !state.currentUser.isAnonymous) {
+    if (isOwner) {
       shareSetlistGroup.style.display = 'flex';
     } else {
       shareSetlistGroup.style.display = 'none';
@@ -3780,6 +3807,8 @@ function renderSetlistEditor() {
   // Reset setlist song search state
   if (el.setlistAddSongSearch) {
     el.setlistAddSongSearch.value = '';
+    el.setlistAddSongSearch.disabled = !isOwner;
+    el.setlistAddSongSearch.placeholder = isOwner ? "Search song to add..." : "View only";
   }
   if (el.setlistAddSongDropdown) {
     el.setlistAddSongDropdown.innerHTML = '';
@@ -3842,9 +3871,11 @@ function renderSetlistEditor() {
       </div>
       <div class="setlist-song-controls">
         <span class="setlist-song-key-badge">${displayKey}</span>
+        ${isOwner ? `
         <button class="setlist-row-btn move-up-btn" title="Move Up" ${index === 0 ? 'disabled' : ''}>▲</button>
         <button class="setlist-row-btn move-down-btn" title="Move Down" ${index === setlist.songs.length - 1 ? 'disabled' : ''}>▼</button>
         <button class="setlist-row-btn remove-song-btn" title="Remove" style="color: #ef4444;">×</button>
+        ` : ''}
       </div>
     `;
 
@@ -3865,12 +3896,65 @@ function renderSetlistEditor() {
       el.songViewport.scrollTop = 0;
     });
 
-    row.querySelector('.move-up-btn').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (index > 0) {
-        const temp = setlist.songs[index];
-        setlist.songs[index] = setlist.songs[index - 1];
-        setlist.songs[index - 1] = temp;
+    const moveUpBtn = row.querySelector('.move-up-btn');
+    if (moveUpBtn) {
+      moveUpBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (index > 0) {
+          const temp = setlist.songs[index];
+          setlist.songs[index] = setlist.songs[index - 1];
+          setlist.songs[index - 1] = temp;
+
+          try {
+            if (db) await dbPutSetlist(db, setlist);
+          } catch (err) { console.error(err); }
+
+          if (state.activeSetlistId === setlist.id) {
+            if (state.activeSetlistSongIndex === index) {
+              state.activeSetlistSongIndex = index - 1;
+            } else if (state.activeSetlistSongIndex === index - 1) {
+              state.activeSetlistSongIndex = index;
+            }
+          }
+
+          renderSetlistEditor();
+          renderActiveSong();
+        }
+      });
+    }
+
+    const moveDownBtn = row.querySelector('.move-down-btn');
+    if (moveDownBtn) {
+      moveDownBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (index < setlist.songs.length - 1) {
+          const temp = setlist.songs[index];
+          setlist.songs[index] = setlist.songs[index + 1];
+          setlist.songs[index + 1] = temp;
+
+          try {
+            if (db) await dbPutSetlist(db, setlist);
+          } catch (err) { console.error(err); }
+
+          if (state.activeSetlistId === setlist.id) {
+            if (state.activeSetlistSongIndex === index) {
+              state.activeSetlistSongIndex = index + 1;
+            } else if (state.activeSetlistSongIndex === index + 1) {
+              state.activeSetlistSongIndex = index;
+            }
+          }
+
+          renderSetlistEditor();
+          renderActiveSong();
+        }
+      });
+    }
+
+    const removeBtn = row.querySelector('.remove-song-btn');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        setlist.songs.splice(index, 1);
 
         try {
           if (db) await dbPutSetlist(db, setlist);
@@ -3878,60 +3962,16 @@ function renderSetlistEditor() {
 
         if (state.activeSetlistId === setlist.id) {
           if (state.activeSetlistSongIndex === index) {
-            state.activeSetlistSongIndex = index - 1;
-          } else if (state.activeSetlistSongIndex === index - 1) {
-            state.activeSetlistSongIndex = index;
+            state.activeSetlistSongIndex = null;
+          } else if (state.activeSetlistSongIndex > index) {
+            state.activeSetlistSongIndex--;
           }
         }
 
         renderSetlistEditor();
         renderActiveSong();
-      }
-    });
-
-    row.querySelector('.move-down-btn').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (index < setlist.songs.length - 1) {
-        const temp = setlist.songs[index];
-        setlist.songs[index] = setlist.songs[index + 1];
-        setlist.songs[index + 1] = temp;
-
-        try {
-          if (db) await dbPutSetlist(db, setlist);
-        } catch (err) { console.error(err); }
-
-        if (state.activeSetlistId === setlist.id) {
-          if (state.activeSetlistSongIndex === index) {
-            state.activeSetlistSongIndex = index + 1;
-          } else if (state.activeSetlistSongIndex === index + 1) {
-            state.activeSetlistSongIndex = index;
-          }
-        }
-
-        renderSetlistEditor();
-        renderActiveSong();
-      }
-    });
-
-    row.querySelector('.remove-song-btn').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      setlist.songs.splice(index, 1);
-
-      try {
-        if (db) await dbPutSetlist(db, setlist);
-      } catch (err) { console.error(err); }
-
-      if (state.activeSetlistId === setlist.id) {
-        if (state.activeSetlistSongIndex === index) {
-          state.activeSetlistSongIndex = null;
-        } else if (state.activeSetlistSongIndex > index) {
-          state.activeSetlistSongIndex--;
-        }
-      }
-
-      renderSetlistEditor();
-      renderActiveSong();
-    });
+      });
+    }
 
     el.setlistSongsContainer.appendChild(row);
   });

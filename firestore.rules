@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /songs/{songId} {
+      allow read: if true;
+      allow create, update: if request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+      allow delete: if request.auth != null && request.auth.token.email == 'ohad.manor@gmail.com';
+    }
+    match /setlists/{setlistId} {
+      allow read: if request.auth != null && (resource == null || resource.data.ownerId == request.auth.uid || resource.data.isShared == true);
+      allow create: if request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    }
+  }
+}
