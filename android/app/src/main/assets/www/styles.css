@@ -526,7 +526,7 @@ body {
   top: -1.05em;
   left: 0;
   font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--chord-color);
   font-size: 0.85em;
   line-height: 1.2;
@@ -537,6 +537,11 @@ body {
   padding: 0 2px;
   border-radius: 3px;
   transition: color 0.1s, transform 0.1s;
+}
+
+strong .chord, .chord strong {
+  font-weight: 900;
+  text-decoration: underline;
 }
 
 .chord:hover {
@@ -1847,7 +1852,7 @@ input:checked + .toggle-slider:before {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 0 auto;
 }
 
 .editor-header {

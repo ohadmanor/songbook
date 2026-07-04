@@ -388,13 +388,22 @@
                 <h2 id="modal-title">Add New Song</h2>
                 <p>Create or import a new song sheet for your library.</p>
               </div>
-              <div class="form-group" id="import-docx-group" style="margin-bottom: 0;">
-                <label for="form-import-file" style="display: flex; gap: 0.5rem; align-items: center; cursor: pointer; margin-bottom: 0;" class="btn">
-                  <span class="material-symbols-outlined" style="font-size: 18px;">upload_file</span>
-                  <span>Import from Word (.docx)</span>
-                  <span id="import-status" style="font-size: 0.75rem; font-weight: normal; color: var(--accent-color);"></span>
-                </label>
-                <input type="file" id="form-import-file" accept=".docx" style="display: none;">
+              <div class="form-group" id="import-docx-group" style="margin-bottom: 0; display: flex; gap: 1rem; flex-wrap: wrap;">
+                <div>
+                  <label for="form-import-file" style="display: flex; gap: 0.5rem; align-items: center; cursor: pointer; margin-bottom: 0;" class="btn">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">upload_file</span>
+                    <span>Import from Word (.docx)</span>
+                    <span id="import-status" style="font-size: 0.75rem; font-weight: normal; color: var(--accent-color);"></span>
+                  </label>
+                  <input type="file" id="form-import-file" accept=".docx" style="display: none;">
+                </div>
+                <div>
+                  <label for="form-import-json" style="display: flex; gap: 0.5rem; align-items: center; cursor: pointer; margin-bottom: 0;" class="btn">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">data_object</span>
+                    <span>Import from JSON</span>
+                  </label>
+                  <input type="file" id="form-import-json" accept=".json" style="display: none;">
+                </div>
               </div>
             </div>
 
@@ -458,16 +467,7 @@
                     </label>
                   </div>
 
-                  <div class="editor-toggle-row" id="share-song-group" style="display: none;">
-                    <div class="editor-toggle-info">
-                      <span class="editor-toggle-title">Share Globally</span>
-                      <span class="editor-toggle-desc">Make this song public for others</span>
-                    </div>
-                    <label class="toggle-switch" style="margin-bottom: 0;">
-                      <input type="checkbox" id="form-share">
-                      <span class="toggle-slider"></span>
-                    </label>
-                  </div>
+
                 </div>
 
                 <div class="editor-form-group" id="remarks-group" style="display: none; flex: 1; width: 100%;">
@@ -497,8 +497,14 @@
                     <button type="button" class="editor-floating-btn" id="editor-preview-toggle-btn" title="Preview Mode">
                       <span class="material-symbols-outlined">visibility</span>
                     </button>
-                    <button type="button" class="editor-floating-btn" id="editor-format-chords-btn" title="Format Chords">
-                      <span class="material-symbols-outlined">auto_fix_high</span>
+                    <button type="button" class="editor-floating-btn" id="editor-format-bold-btn" title="Bold Text">
+                      <span class="material-symbols-outlined">format_bold</span>
+                    </button>
+                    <button type="button" class="editor-floating-btn" id="editor-format-green-btn" title="Highlight Green" style="color: #22c55e;">
+                      <span class="material-symbols-outlined">format_color_fill</span>
+                    </button>
+                    <button type="button" class="editor-floating-btn" id="editor-format-yellow-btn" title="Highlight Yellow" style="color: #eab308;">
+                      <span class="material-symbols-outlined">format_color_fill</span>
                     </button>
                   </div>
                 </div>
@@ -509,13 +515,13 @@
             <div class="editor-footer">
               <button type="button" class="btn-text-link-danger" id="delete-song-btn" style="display: none;">
                 <span class="material-symbols-outlined">delete</span>
-                <span>Delete Song</span>
+                <span id="delete-song-btn-text">Delete Song</span>
               </button>
               <div style="flex: 1;"></div>
               <button class="btn" id="cancel-modal-btn" style="margin-right: 0.75rem;">Cancel</button>
               <button class="btn btn-primary" id="save-song-btn">
-                <span class="material-symbols-outlined" style="font-size: 18px; margin-right: 4px;">save</span>
-                Save Song
+                <span class="material-symbols-outlined" style="font-size: 18px; margin-right: 4px;" id="save-song-btn-icon">save</span>
+                <span id="save-song-btn-text">Save Song</span>
               </button>
             </div>
           </div>
@@ -654,6 +660,6 @@
   <script src="chord-db.js"></script>
   <script src="songs-data.js"></script>
   <script src="parser.js"></script>
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=23"></script>
 </body>
 </html>

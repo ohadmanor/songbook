@@ -16,10 +16,21 @@ const firebaseConfig = {
 
 let dbFirestore = null;
 if (typeof firebase !== 'undefined') {
+  // Suppress the harmless deprecation warning about enableIndexedDbPersistence
+  // Must intercept before firebase.firestore() captures the reference
+  const _origWarn = console.warn.bind(console);
+  console.warn = function(...args) {
+    const msg = typeof args[0] === 'string' ? args[0] : (args[1] && typeof args[1] === 'string' ? args[1] : '');
+    if (msg.includes('enableIndexedDbPersistence() will be deprecated')) return;
+    _origWarn.apply(console, args);
+  };
+
   firebase.initializeApp(firebaseConfig);
   dbFirestore = firebase.firestore();
   dbFirestore.enablePersistence().catch((err) => {
-    console.warn("Firestore persistence error:", err);
+    if (err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
+      console.warn("Firestore persistence error:", err);
+    }
   });
 }
 
@@ -157,6 +168,7 @@ const el = {
   cancelModalBtn: document.getElementById('cancel-modal-btn'),
   saveSongBtn: document.getElementById('save-song-btn'),
   deleteSongBtn: document.getElementById('delete-song-btn'),
+  deleteSongBtnText: document.getElementById('delete-song-btn-text'),
   modalTitle: document.getElementById('modal-title'),
   editSongId: document.getElementById('edit-song-id'),
   formTitle: document.getElementById('form-title'),
@@ -168,11 +180,15 @@ const el = {
   formRemarks: document.getElementById('form-remarks'),
   importDocxGroup: document.getElementById('import-docx-group'),
   formImportFile: document.getElementById('form-import-file'),
+  formImportJson: document.getElementById('form-import-json'),
   importStatus: document.getElementById('import-status'),
   mainToolbar: document.getElementById('main-toolbar'),
   editorBackBtn: document.getElementById('editor-back-btn'),
   editorPreviewToggleBtn: document.getElementById('editor-preview-toggle-btn'),
-  editorFormatChordsBtn: document.getElementById('editor-format-chords-btn'),
+  editorBoldBtn: document.getElementById('editor-format-bold-btn'),
+  editorHighlightGreenBtn: document.getElementById('editor-format-green-btn'),
+  editorHighlightBtn: document.getElementById('editor-format-yellow-btn'),
+  saveSongBtnText: document.getElementById('save-song-btn-text'),
   editorPreviewDisplay: document.getElementById('editor-preview-display'),
   exportDbBtn: document.getElementById('export-db-btn'),
   restoreBackupBtn: document.getElementById('restore-backup-btn'),
@@ -680,18 +696,36 @@ function startRealtimeSync() {
       renderSidebar();
     });
   } else {
-    unsubscribeSetlists = dbFirestore.collection('setlists').onSnapshot((snapshot) => {
-      let setlists = [];
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        if (data.isShared || data.ownerId === uid) {
-          setlists.push(data);
-        }
-      });
-      state.setlists = setlists;
+    const setlistsRef = dbFirestore.collection('setlists');
+    
+    let ownedSetlists = [];
+    let sharedSetlists = [];
+    
+    const updateState = () => {
+      const map = new Map();
+      ownedSetlists.forEach(s => map.set(s.id, s));
+      sharedSetlists.forEach(s => map.set(s.id, s));
+      state.setlists = Array.from(map.values());
       renderToolbarSetlistSelect();
       renderSidebar();
-    });
+    };
+
+    const unsubOwned = setlistsRef.where('ownerId', '==', uid).onSnapshot((snap) => {
+      ownedSetlists = [];
+      snap.forEach(doc => ownedSetlists.push(doc.data()));
+      updateState();
+    }, (err) => console.error("Owned setlists sync error:", err));
+    
+    const unsubShared = setlistsRef.where('isShared', '==', true).onSnapshot((snap) => {
+      sharedSetlists = [];
+      snap.forEach(doc => sharedSetlists.push(doc.data()));
+      updateState();
+    }, (err) => console.error("Shared setlists sync error:", err));
+
+    unsubscribeSetlists = () => {
+      unsubOwned();
+      unsubShared();
+    };
   }
 }
 
@@ -1046,36 +1080,11 @@ function bindEvents(db) {
         
         // Hide editor textarea, show preview container
         el.formText.style.display = 'none';
+        el.editorPreviewDisplay.className = `editor-textarea-preview-display song-container ${el.formRtl && el.formRtl.checked ? 'rtl' : ''}`;
         el.editorPreviewDisplay.style.display = 'block';
         const span = el.editorPreviewToggleBtn.querySelector('span');
         if (span) span.textContent = 'edit';
         el.editorPreviewToggleBtn.title = 'Edit Mode';
-      }
-    });
-  }
-
-  if (el.editorFormatChordsBtn && el.formText) {
-    el.editorFormatChordsBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const originalText = el.formText.value || '';
-      const formatted = originalText.split('\n').map(line => line.trimEnd()).join('\n');
-      el.formText.value = formatted;
-      showToast("Chords formatted (trailing whitespace trimmed).");
-      
-      // If we are currently in preview mode, refresh the preview
-      if (el.editorPreviewDisplay.style.display !== 'none') {
-        const textWithFullImages = formatted.replace(/\[IMAGE:\s*(\d+)\]/g, (match, idxStr) => {
-          const idx = parseInt(idxStr, 10) - 1;
-          if (state.editorImages && state.editorImages[idx]) {
-            return `[IMAGE: ${state.editorImages[idx]}]`;
-          }
-          return match;
-        });
-        const rendered = buildSongBodyFromRawText(textWithFullImages, {
-          isRTL: el.formRtl ? el.formRtl.checked : false
-        });
-        el.editorPreviewDisplay.innerHTML = '';
-        el.editorPreviewDisplay.appendChild(rendered);
       }
     });
   }
@@ -1098,42 +1107,83 @@ function bindEvents(db) {
   }
 
   // Editor formatting toolbar selection wrapping helper
-  const wrapTextSelection = (tagOpen, tagClose) => {
+  const wrapTextSelection = (tag) => {
     const textarea = el.formText;
     if (!textarea) return;
 
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-    const selectedText = text.substring(start, end);
+    let start = textarea.selectionStart;
+    let end = textarea.selectionEnd;
+    let fullText = textarea.value;
+
+    // 1. Expand selection if immediately bounded by known tags
+    let expanded = true;
+    while(expanded) {
+      expanded = false;
+      const tLen = 2;
+      
+      const before = start >= tLen ? fullText.substring(start - tLen, start) : '';
+      const after = end <= fullText.length - tLen ? fullText.substring(end, end + tLen) : '';
+      
+      for (const t of ['**', '==', '%%']) {
+        if (before === t && after === t) {
+          start -= tLen;
+          end += tLen;
+          expanded = true;
+          break;
+        }
+      }
+    }
+
+    let selectedText = fullText.substring(start, end);
+
+    // 2. Check if we are toggling OFF the exact requested tag
+    const strippedSelected = selectedText.trim();
+    const isTogglingOff = strippedSelected.startsWith(tag) && strippedSelected.endsWith(tag) && strippedSelected.length >= tag.length * 2;
+
+    // 3. Clean all formatting tags from the text to prevent nesting
+    const cleanText = selectedText.replace(/\*\*|==|%%/g, '');
+
+    // 4. Extract spaces from the cleaned text so we put tags INSIDE the spaces
+    const leadingSpacesMatch = cleanText.match(/^\s*/);
+    const trailingSpacesMatch = cleanText.match(/\s*$/);
+    const leadingSpaces = leadingSpacesMatch ? leadingSpacesMatch[0] : '';
+    const trailingSpaces = trailingSpacesMatch ? trailingSpacesMatch[0] : '';
     
-    const replacement = tagOpen + selectedText + tagClose;
-    textarea.value = text.substring(0, start) + replacement + text.substring(end);
-    
-    // Restore focus and selection
+    let coreText = cleanText.substring(leadingSpaces.length, cleanText.length - trailingSpaces.length);
+
+    let replacementCore = coreText;
+    if (!isTogglingOff) {
+      if (coreText.length > 0) {
+        replacementCore = tag + coreText + tag;
+      } else {
+        replacementCore = tag + tag;
+      }
+    }
+
+    const replacement = leadingSpaces + replacementCore + trailingSpaces;
+
     textarea.focus();
-    textarea.selectionStart = start;
-    textarea.selectionEnd = start + replacement.length;
+    textarea.setRangeText(replacement, start, end, 'select');
   };
 
   if (el.editorBoldBtn) {
     el.editorBoldBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      wrapTextSelection('**', '**');
+      wrapTextSelection('**');
     });
   }
 
   if (el.editorHighlightBtn) {
     el.editorHighlightBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      wrapTextSelection('==', '==');
+      wrapTextSelection('==');
     });
   }
 
   if (el.editorHighlightGreenBtn) {
     el.editorHighlightGreenBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      wrapTextSelection('%%', '%%');
+      wrapTextSelection('%%');
     });
   }
 
@@ -1245,7 +1295,6 @@ function bindEvents(db) {
 
     if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
       song.ownerId = originalSong ? (originalSong.ownerId || state.currentUser.uid) : state.currentUser.uid;
-      song.isShared = formShare ? formShare.checked : false;
       try {
         await dbFirestore.collection('songs').doc(id).set(song);
         showToast("Song saved to cloud.");
@@ -1317,37 +1366,56 @@ function bindEvents(db) {
     }
   });
 
+
   // Delete Song Button
   el.deleteSongBtn.addEventListener('click', async () => {
     const id = el.editSongId.value;
     if (!id) return;
 
+    const isSetlistEdit = !!(state.activeSetlistId && state.activeSetlistSongIndex !== null);
+    if (isSetlistEdit) {
+      if (confirm("Are you sure you want to remove this song from the setlist?")) {
+        const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
+        if (setlist && setlist.songs[state.activeSetlistSongIndex]) {
+          setlist.songs.splice(state.activeSetlistSongIndex, 1);
+          try {
+            if (db) await dbPutSetlist(db, setlist);
+            showToast("Song removed from setlist.");
+            closeSongModal();
+            renderSetlistEditor();
+            if (state.currentSongId) renderActiveSong();
+          } catch (e) {
+            console.error(e);
+            showToast("Failed to remove song from setlist.");
+          }
+        }
+      }
+      return;
+    }
+
     if (confirm("Are you sure you want to delete this song permanently?")) {
-      if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
+      const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+      let cloudSuccess = false;
+
+      if (state.currentUser && state.currentUser.email === 'ohad.manor@gmail.com' && typeof dbFirestore !== 'undefined' && dbFirestore) {
         try {
-          if (!id.startsWith('custom_')) {
-            // It's a default song. Set tombstone in Firestore.
-            await dbFirestore.collection('songs').doc(id).set({
-              id,
-              deleted: true,
-              ownerId: state.currentUser.uid
-            });
-            
-            // Also store in local deletedSongIds so we know it's deleted locally
-            let deletedSongIds = [];
-            try {
-              deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
-            } catch (e) {}
-            if (!deletedSongIds.includes(id)) {
-              deletedSongIds.push(id);
-              localStorage.setItem('deletedSongIds', JSON.stringify(deletedSongIds));
-            }
-          } else {
-            // It's a custom song. Delete from Firestore.
-            await dbFirestore.collection('songs').doc(id).delete();
+          // Mark the song as deleted in Firestore (works for both default and custom songs)
+          await dbFirestore.collection('songs').doc(id).set({
+            id,
+            deleted: true,
+            ownerId: state.currentUser.uid
+          });
+          
+          // Also track in localStorage so it stays deleted even offline
+          let deletedSongIds = [];
+          try {
+            deletedSongIds = JSON.parse(localStorage.getItem('deletedSongIds') || '[]');
+          } catch (e) {}
+          if (!deletedSongIds.includes(id)) {
+            deletedSongIds.push(id);
+            localStorage.setItem('deletedSongIds', JSON.stringify(deletedSongIds));
           }
 
-          // Also delete from IndexedDB in case it exists locally
           if (db) {
             try {
               await dbDeleteSong(db, id);
@@ -1357,8 +1425,8 @@ function bindEvents(db) {
           }
 
           showToast("Song deleted from cloud.");
+          cloudSuccess = true;
 
-          // Update local state and refresh UI immediately
           state.songs = state.songs.filter(s => s.id !== id);
           state.filteredSongs = state.filteredSongs.filter(s => s.id !== id);
 
@@ -1376,13 +1444,13 @@ function bindEvents(db) {
           renderActiveSong();
           closeSongModal();
         } catch (err) {
-          console.error(err);
-          showToast("Failed to delete from cloud.");
+          console.error("Cloud delete failed:", err);
+          showToast("Cloud delete failed: " + (err.message || err.code || 'unknown error'));
         }
-      } else {
-        const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+      } 
+      
+      if (!cloudSuccess) {
         if (isLocalOrDev) {
-          // If default song, add to deleted default list in localStorage
           if (!id.startsWith('custom_')) {
             let deletedSongIds = [];
             try {
@@ -1394,7 +1462,6 @@ function bindEvents(db) {
             }
           }
 
-          // Delete from IndexedDB
           if (db) {
             try {
               await dbDeleteSong(db, id);
@@ -1403,7 +1470,6 @@ function bindEvents(db) {
             }
           }
 
-          // If running on local dev server, call delete-song API
           if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
             try {
               const response = await fetch('/api/delete-song', {
@@ -1421,7 +1487,6 @@ function bindEvents(db) {
             showToast("Song deleted locally.");
           }
 
-          // Update local state and refresh UI immediately
           state.songs = state.songs.filter(s => s.id !== id);
           state.filteredSongs = state.filteredSongs.filter(s => s.id !== id);
 
@@ -1439,7 +1504,7 @@ function bindEvents(db) {
           renderActiveSong();
           closeSongModal();
         } else {
-          showToast("Guests cannot delete songs.");
+          showToast("Only ohad.manor@gmail.com can delete songs.");
         }
       }
     }
@@ -1920,7 +1985,7 @@ function bindEvents(db) {
       const file = e.target.files[0];
       if (!file) return;
 
-      el.importStatus.textContent = "Processing...";
+      if (el.importStatus) el.importStatus.textContent = "Processing...";
 
       try {
         const result = await parseDocxFile(file);
@@ -1931,13 +1996,68 @@ function bindEvents(db) {
         el.formRtl.checked = result.isRTL;
         updateFormTextDirection();
 
-        el.importStatus.textContent = "Imported successfully!";
+        if (el.importStatus) el.importStatus.textContent = "Imported successfully!";
         showToast("Word document converted.");
+        
+        // Reset file input so same file can be loaded again if needed
+        e.target.value = '';
+        setTimeout(() => {
+          if (el.importStatus) el.importStatus.textContent = "";
+        }, 3000);
       } catch (err) {
         console.error(err);
-        el.importStatus.textContent = "Import failed.";
+        if (el.importStatus) el.importStatus.textContent = "Import failed.";
         showToast("Failed to parse Word file.");
+        
+        e.target.value = '';
+        setTimeout(() => {
+          if (el.importStatus) el.importStatus.textContent = "";
+        }, 3000);
       }
+    });
+  }
+
+  // JSON Import listener
+  if (el.formImportJson) {
+    el.formImportJson.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const songData = JSON.parse(evt.target.result);
+          el.formTitle.value = songData.title || "";
+          el.formArtist.value = songData.artist || "";
+          el.formKey.value = songData.key || "";
+          if (el.formRtl) el.formRtl.checked = !!songData.isRTL;
+          el.formText.value = songData.rawText || "";
+          if (songData.remarks && el.formRemarks) el.formRemarks.value = songData.remarks;
+          
+          updateFormTextDirection();
+          
+          if (el.importStatus) el.importStatus.textContent = "JSON Import successful!";
+          showToast("JSON song imported.");
+        } catch (err) {
+          console.error("Failed to parse JSON file:", err);
+          if (el.importStatus) el.importStatus.textContent = "Error parsing JSON.";
+          showToast("Failed to parse JSON file.");
+        }
+        
+        e.target.value = '';
+        setTimeout(() => {
+          if (el.importStatus) el.importStatus.textContent = "";
+        }, 3000);
+      };
+      
+      reader.onerror = () => {
+        console.error("Failed to read JSON file");
+        if (el.importStatus) el.importStatus.textContent = "Error reading JSON.";
+        showToast("Failed to read JSON file.");
+        e.target.value = '';
+      };
+      
+      reader.readAsText(file);
     });
   }
 
@@ -2716,6 +2836,15 @@ function renderSongList() {
   });
 }
 
+// Format chord line HTML without escaping to preserve generated spans
+function formatChordLineHtml(html) {
+  if (!html) return '';
+  return html
+    .replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/==([\s\S]*?)==/g, '<mark class="song-highlight">$1</mark>')
+    .replace(/%%([\s\S]*?)%%/g, '<mark class="song-highlight-green">$1</mark>');
+}
+
 function buildSongBodyFromRawText(rawText, options = {}) {
   const resolveImageSrc = typeof options.resolveImageSrc === 'function'
     ? options.resolveImageSrc
@@ -2768,15 +2897,22 @@ function buildSongBodyFromRawText(rawText, options = {}) {
               const startIdx = chord.index;
               htmlResult += escapeHTML(rawChordLine.substring(lastIdx, startIdx));
 
-              const transposed = window.Transposer.transposeChord(chord.text, state.transposeOffset, state.preferFlats);
+              const prefixMatch = chord.text.match(/^[%=\*]+/);
+              const suffixMatch = chord.text.match(/[%=\*]+$/);
+              const prefix = prefixMatch ? prefixMatch[0] : '';
+              const suffix = suffixMatch ? suffixMatch[0] : '';
+              
+              const coreChord = chord.text.replace(/[%=\*]/g, '');
+
+              const transposed = window.Transposer.transposeChord(coreChord, state.transposeOffset, state.preferFlats);
               const cleanDisplay = cleanChordNameForDisplay(transposed);
 
-              htmlResult += `<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>`;
+              htmlResult += `${prefix}<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>${suffix}`;
               lastIdx = startIdx + chord.text.length;
             });
 
             htmlResult += escapeHTML(rawChordLine.substring(lastIdx));
-            chordDiv.innerHTML = htmlResult;
+            chordDiv.innerHTML = formatChordLineHtml(htmlResult);
           }
 
           const lyricDiv = document.createElement('div');
@@ -2801,18 +2937,25 @@ function buildSongBodyFromRawText(rawText, options = {}) {
               // Append text/spaces before this chord
               htmlResult += escapeHTML(rawLine.substring(lastIdx, startIdx));
 
+              const prefixMatch = chord.text.match(/^[%=\*]+/);
+              const suffixMatch = chord.text.match(/[%=\*]+$/);
+              const prefix = prefixMatch ? prefixMatch[0] : '';
+              const suffix = suffixMatch ? suffixMatch[0] : '';
+              
+              const coreChord = chord.text.replace(/[%=\*]/g, '');
+
               // Transpose and clean
-              const transposed = window.Transposer.transposeChord(chord.text, state.transposeOffset, state.preferFlats);
+              const transposed = window.Transposer.transposeChord(coreChord, state.transposeOffset, state.preferFlats);
               const cleanDisplay = cleanChordNameForDisplay(transposed);
 
               // Render chord in-flow
-              htmlResult += `<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>`;
+              htmlResult += `${prefix}<span class="chord" data-chord="${cleanDisplay}">${cleanDisplay}</span>${suffix}`;
               lastIdx = startIdx + chord.text.length;
             });
 
             // Append trailing characters
             htmlResult += escapeHTML(rawLine.substring(lastIdx));
-            lineDiv.innerHTML = htmlResult;
+            lineDiv.innerHTML = formatChordLineHtml(htmlResult);
           }
         } else {
           // Plain lyrics
@@ -3362,12 +3505,17 @@ function openSongModal(song = null) {
   if (song) {
     // Editing mode
     el.modalTitle.textContent = isSetlistEdit ? "Edit Song in Setlist" : "Edit Song";
+    
+    // Update button text and secondary button visibility
+    if (el.saveSongBtnText) {
+      el.saveSongBtnText.textContent = isSetlistEdit ? "Save to Setlist" : "Save Song";
+    }
+
     el.editSongId.value = song.id;
     el.formTitle.value = song.title;
     el.formArtist.value = song.artist === 'Unknown Artist' ? '' : song.artist;
     el.formKey.value = song.key || '';
     el.formRtl.checked = song.isRTL;
-    if (formShare) formShare.checked = song.isShared || false;
     
     // Parse rawText to extract full image sources and replace them with short placeholders
     let rawText = song.rawText || '';
@@ -3384,13 +3532,25 @@ function openSongModal(song = null) {
     if (el.formRemarks) {
       el.formRemarks.value = song.remarks || '';
     }
-    el.deleteSongBtn.style.display = isSetlistEdit ? 'none' : 'block';
+    
+    const isLocalOrDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:' || location.hostname === 'appassets.androidplatform.net';
+    if (isSetlistEdit || (state.currentUser && state.currentUser.email === 'ohad.manor@gmail.com') || isLocalOrDev) {
+      el.deleteSongBtn.style.display = 'flex';
+    } else {
+      el.deleteSongBtn.style.display = 'none';
+    }
+    if (el.deleteSongBtnText) {
+      el.deleteSongBtnText.textContent = isSetlistEdit ? "Remove from Setlist" : "Delete Song";
+    }
+
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'none';
   } else {
     // New song mode
     el.modalTitle.textContent = "Add New Song";
+    if (el.saveSongBtnText) {
+      el.saveSongBtnText.textContent = "Save Song";
+    }
     el.deleteSongBtn.style.display = 'none';
-    if (formShare) formShare.checked = false;
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'block';
   }
 
@@ -3546,7 +3706,7 @@ function renderSetlistsList() {
         </div>
       </div>
       <div style="display: flex; gap: 0.2rem; align-items: center; flex-shrink: 0;">
-        ${(state.currentUser && !state.currentUser.isAnonymous) ? `
+        ${(state.currentUser && !state.currentUser.isAnonymous && setlist.ownerId === state.currentUser.uid) ? `
         <button class="toggle-privacy-btn" title="${setlist.isShared ? 'Public - Click to make Private' : 'Private - Click to make Public'}" style="color: ${setlist.isShared ? 'var(--accent-color)' : 'var(--text-secondary)'}; border: none; background: transparent; width: 28px; height: 28px; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.2s, transform 0.15s ease; border-radius: 4px;">
           ${setlist.isShared ? `
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -3631,10 +3791,13 @@ function renderSetlistEditor() {
   const setlist = state.setlists.find(s => s.id === state.activeSetlistId);
   if (!setlist) return;
 
+  const isOwner = state.currentUser && !state.currentUser.isAnonymous && setlist.ownerId === state.currentUser.uid;
+
   el.setlistNameInput.value = setlist.name;
+  el.setlistNameInput.disabled = !isOwner;
   if (setlistShareCheckbox) setlistShareCheckbox.checked = setlist.isShared || false;
   if (shareSetlistGroup) {
-    if (state.currentUser && !state.currentUser.isAnonymous) {
+    if (isOwner) {
       shareSetlistGroup.style.display = 'flex';
     } else {
       shareSetlistGroup.style.display = 'none';
@@ -3644,6 +3807,8 @@ function renderSetlistEditor() {
   // Reset setlist song search state
   if (el.setlistAddSongSearch) {
     el.setlistAddSongSearch.value = '';
+    el.setlistAddSongSearch.disabled = !isOwner;
+    el.setlistAddSongSearch.placeholder = isOwner ? "Search song to add..." : "View only";
   }
   if (el.setlistAddSongDropdown) {
     el.setlistAddSongDropdown.innerHTML = '';
@@ -3706,9 +3871,11 @@ function renderSetlistEditor() {
       </div>
       <div class="setlist-song-controls">
         <span class="setlist-song-key-badge">${displayKey}</span>
+        ${isOwner ? `
         <button class="setlist-row-btn move-up-btn" title="Move Up" ${index === 0 ? 'disabled' : ''}>▲</button>
         <button class="setlist-row-btn move-down-btn" title="Move Down" ${index === setlist.songs.length - 1 ? 'disabled' : ''}>▼</button>
         <button class="setlist-row-btn remove-song-btn" title="Remove" style="color: #ef4444;">×</button>
+        ` : ''}
       </div>
     `;
 
@@ -3729,12 +3896,65 @@ function renderSetlistEditor() {
       el.songViewport.scrollTop = 0;
     });
 
-    row.querySelector('.move-up-btn').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (index > 0) {
-        const temp = setlist.songs[index];
-        setlist.songs[index] = setlist.songs[index - 1];
-        setlist.songs[index - 1] = temp;
+    const moveUpBtn = row.querySelector('.move-up-btn');
+    if (moveUpBtn) {
+      moveUpBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (index > 0) {
+          const temp = setlist.songs[index];
+          setlist.songs[index] = setlist.songs[index - 1];
+          setlist.songs[index - 1] = temp;
+
+          try {
+            if (db) await dbPutSetlist(db, setlist);
+          } catch (err) { console.error(err); }
+
+          if (state.activeSetlistId === setlist.id) {
+            if (state.activeSetlistSongIndex === index) {
+              state.activeSetlistSongIndex = index - 1;
+            } else if (state.activeSetlistSongIndex === index - 1) {
+              state.activeSetlistSongIndex = index;
+            }
+          }
+
+          renderSetlistEditor();
+          renderActiveSong();
+        }
+      });
+    }
+
+    const moveDownBtn = row.querySelector('.move-down-btn');
+    if (moveDownBtn) {
+      moveDownBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (index < setlist.songs.length - 1) {
+          const temp = setlist.songs[index];
+          setlist.songs[index] = setlist.songs[index + 1];
+          setlist.songs[index + 1] = temp;
+
+          try {
+            if (db) await dbPutSetlist(db, setlist);
+          } catch (err) { console.error(err); }
+
+          if (state.activeSetlistId === setlist.id) {
+            if (state.activeSetlistSongIndex === index) {
+              state.activeSetlistSongIndex = index + 1;
+            } else if (state.activeSetlistSongIndex === index + 1) {
+              state.activeSetlistSongIndex = index;
+            }
+          }
+
+          renderSetlistEditor();
+          renderActiveSong();
+        }
+      });
+    }
+
+    const removeBtn = row.querySelector('.remove-song-btn');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        setlist.songs.splice(index, 1);
 
         try {
           if (db) await dbPutSetlist(db, setlist);
@@ -3742,60 +3962,16 @@ function renderSetlistEditor() {
 
         if (state.activeSetlistId === setlist.id) {
           if (state.activeSetlistSongIndex === index) {
-            state.activeSetlistSongIndex = index - 1;
-          } else if (state.activeSetlistSongIndex === index - 1) {
-            state.activeSetlistSongIndex = index;
+            state.activeSetlistSongIndex = null;
+          } else if (state.activeSetlistSongIndex > index) {
+            state.activeSetlistSongIndex--;
           }
         }
 
         renderSetlistEditor();
         renderActiveSong();
-      }
-    });
-
-    row.querySelector('.move-down-btn').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (index < setlist.songs.length - 1) {
-        const temp = setlist.songs[index];
-        setlist.songs[index] = setlist.songs[index + 1];
-        setlist.songs[index + 1] = temp;
-
-        try {
-          if (db) await dbPutSetlist(db, setlist);
-        } catch (err) { console.error(err); }
-
-        if (state.activeSetlistId === setlist.id) {
-          if (state.activeSetlistSongIndex === index) {
-            state.activeSetlistSongIndex = index + 1;
-          } else if (state.activeSetlistSongIndex === index + 1) {
-            state.activeSetlistSongIndex = index;
-          }
-        }
-
-        renderSetlistEditor();
-        renderActiveSong();
-      }
-    });
-
-    row.querySelector('.remove-song-btn').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      setlist.songs.splice(index, 1);
-
-      try {
-        if (db) await dbPutSetlist(db, setlist);
-      } catch (err) { console.error(err); }
-
-      if (state.activeSetlistId === setlist.id) {
-        if (state.activeSetlistSongIndex === index) {
-          state.activeSetlistSongIndex = null;
-        } else if (state.activeSetlistSongIndex > index) {
-          state.activeSetlistSongIndex--;
-        }
-      }
-
-      renderSetlistEditor();
-      renderActiveSong();
-    });
+      });
+    }
 
     el.setlistSongsContainer.appendChild(row);
   });
