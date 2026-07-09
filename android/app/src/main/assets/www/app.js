@@ -3049,16 +3049,66 @@ function renderActiveSong() {
       const prevDisabled = state.activeSetlistSongIndex === 0 ? 'disabled' : '';
       const nextDisabled = state.activeSetlistSongIndex === activeSetlist.songs.length - 1 ? 'disabled' : '';
 
+      // In fullscreen mode, embed the scroll/exit controls directly in the gig nav bar
+      const inlineControlsHtml = state.isFullscreen ? `
+        <div class="gig-nav-inline-controls">
+          <span class="control-label" style="font-size: 0.65rem; color: var(--text-primary); opacity: 0.8; font-weight: bold; margin-right: 0.2rem; user-select: none;">Speed</span>
+          <input type="range" id="gig-inline-speed-slider" min="1" max="10" value="${el.fullscreenScrollSpeedSlider ? el.fullscreenScrollSpeedSlider.value : 5}" style="width: 50px; cursor: pointer; height: 12px; margin-right: 0.3rem; padding: 0;">
+          <button class="btn autoscroll-btn" id="gig-inline-scroll-toggle" title="Toggle Auto-Scroll" style="padding: 4px 8px; font-size: 0.75rem; border-radius: 4px; margin-right: 0.3rem; height: 26px; flex: none; width: auto;">${state.isScrolling ? 'Pause' : 'Play'}</button>
+          <div style="width: 1px; height: 16px; background-color: var(--border-color); margin-right: 0.3rem;"></div>
+          <button class="btn" id="gig-inline-restore-btn" title="Exit Fullscreen" style="border: none; padding: 0; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--text-primary);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
+            </svg>
+          </button>
+        </div>
+      ` : '';
+
       navBar.innerHTML = `
         <button class="btn gig-nav-btn" id="gig-prev-btn" ${prevDisabled}>← Prev</button>
         <div class="gig-nav-info">
           <span class="gig-setlist-name">${escapeHTML(activeSetlist.name)}</span>
           <span class="gig-song-counter">Song ${state.activeSetlistSongIndex + 1} of ${activeSetlist.songs.length}</span>
         </div>
+        ${inlineControlsHtml}
         <button class="btn gig-nav-btn" id="gig-next-btn" ${nextDisabled}>Next →</button>
       `;
 
       gigNavContainer.appendChild(navBar);
+
+      // Hide the floating fullscreen-controls when gig nav has inline controls
+      if (state.isFullscreen && el.fullscreenControls) {
+        el.fullscreenControls.style.display = 'none';
+      }
+
+      // Wire up inline fullscreen controls if present
+      const inlineSpeedSlider = navBar.querySelector('#gig-inline-speed-slider');
+      const inlineScrollToggle = navBar.querySelector('#gig-inline-scroll-toggle');
+      const inlineRestoreBtn = navBar.querySelector('#gig-inline-restore-btn');
+
+      if (inlineSpeedSlider) {
+        inlineSpeedSlider.addEventListener('input', (e) => {
+          state.scrollSpeed = parseInt(e.target.value);
+          if (el.fullscreenScrollSpeedSlider) el.fullscreenScrollSpeedSlider.value = e.target.value;
+        });
+      }
+      if (inlineScrollToggle) {
+        inlineScrollToggle.addEventListener('click', () => {
+          toggleAutoScroll();
+          inlineScrollToggle.textContent = state.isScrolling ? 'Pause' : 'Play';
+          if (state.isScrolling) {
+            inlineScrollToggle.classList.add('active');
+          } else {
+            inlineScrollToggle.classList.remove('active');
+          }
+        });
+      }
+      if (inlineRestoreBtn) {
+        inlineRestoreBtn.addEventListener('click', () => {
+          toggleFullscreen(false);
+          renderActiveSong();
+        });
+      }
 
       navBar.querySelector('#gig-prev-btn').addEventListener('click', () => {
         if (state.activeSetlistSongIndex > 0) {
@@ -3073,6 +3123,10 @@ function renderActiveSong() {
       });
     } else {
       gigNavContainer.style.display = 'none';
+      // Show floating fullscreen-controls when no gig nav (non-setlist fullscreen)
+      if (state.isFullscreen && el.fullscreenControls) {
+        el.fullscreenControls.style.display = 'flex';
+      }
     }
   }
 
@@ -4101,7 +4155,12 @@ function toggleFullscreen(enable) {
   const appContainer = document.querySelector('.app-container');
   if (enable) {
     appContainer.classList.add('fullscreen');
-    if (el.fullscreenControls) el.fullscreenControls.style.display = 'flex';
+    // In setlist mode, fullscreen controls are embedded in the gig nav bar
+    // (handled by renderActiveSong), so don't show the floating controls
+    const inSetlistMode = state.activeSetlistId && state.activeSetlistSongIndex !== null;
+    if (el.fullscreenControls && !inSetlistMode) {
+      el.fullscreenControls.style.display = 'flex';
+    }
   } else {
     appContainer.classList.remove('fullscreen');
     if (el.fullscreenControls) el.fullscreenControls.style.display = 'none';
