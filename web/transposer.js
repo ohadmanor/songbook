@@ -78,7 +78,7 @@ function parseChord(chordStr) {
   const suffix = mainChord.slice(root.length);
   
   // Validate that the suffix is a valid musical chord suffix, not arbitrary text (like "nd" in "And")
-  const VALID_SUFFIX_REGEX = /^(?:m|M|maj|min|sus|add|dim|aug|alt|Δ|ø|0|o|O)?(?:\d+)?(?:[b#+\-]?\d*)?$/;
+  const VALID_SUFFIX_REGEX = /^(?:m|M|maj|min|madd|minadd|sus|add|dim|aug|alt|Δ|ø|0|o|O)?(?:\d+)?(?:[b#+\-]?\d*)?$/;
   if (!VALID_SUFFIX_REGEX.test(suffix)) {
     return null;
   }
