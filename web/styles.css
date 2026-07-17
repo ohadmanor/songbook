@@ -277,6 +277,18 @@ body {
   background-color: var(--accent-color);
 }
 
+.btn-orange {
+  background-color: #ea580c;
+  color: #ffffff;
+  border-color: #ea580c;
+}
+
+.btn-orange:hover {
+  opacity: 0.9;
+  background-color: #ea580c;
+  border-color: #ea580c;
+}
+
 /* Main Display Panel */
 .main-panel {
   display: flex;

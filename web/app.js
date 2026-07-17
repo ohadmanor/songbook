@@ -39,6 +39,7 @@ let state = {
   currentUser: null,
   songs: [],
   filteredSongs: [],
+  favorites: [],
   currentSongId: null,
   transposeOffset: 0,
   fontSize: 1.0,
@@ -207,6 +208,7 @@ const el = {
   toolbarActions: document.getElementById('toolbar-actions'),
   bottomSheetBackdrop: document.getElementById('bottom-sheet-backdrop'),
   dashboardNewSetlistBtn: document.getElementById('dashboard-new-setlist-btn'),
+  dashboardJammingBtn: document.getElementById('dashboard-jamming-btn'),
   dashboardImportSetlistBtn: document.getElementById('dashboard-import-setlist-btn')
 };
 
@@ -525,6 +527,7 @@ async function init() {
             if (el.newSetlistBtn) el.newSetlistBtn.style.display = 'block';
             if (el.dashboardNewSetlistBtn) el.dashboardNewSetlistBtn.style.display = 'flex';
             if (el.dashboardImportSetlistBtn) el.dashboardImportSetlistBtn.style.display = 'flex';
+            if (el.dashboardJammingBtn) el.dashboardJammingBtn.style.display = 'flex';
             if (el.exportDbBtn) el.exportDbBtn.style.display = '';
             if (el.restoreBackupBtn) el.restoreBackupBtn.style.display = '';
           } else {
@@ -536,6 +539,7 @@ async function init() {
             if (el.newSetlistBtn) el.newSetlistBtn.style.display = 'none';
             if (el.dashboardNewSetlistBtn) el.dashboardNewSetlistBtn.style.display = 'none';
             if (el.dashboardImportSetlistBtn) el.dashboardImportSetlistBtn.style.display = 'none';
+            if (el.dashboardJammingBtn) el.dashboardJammingBtn.style.display = 'none';
             if (el.exportDbBtn) el.exportDbBtn.style.display = 'none';
             if (el.restoreBackupBtn) el.restoreBackupBtn.style.display = 'none';
           }
@@ -636,6 +640,7 @@ async function init() {
 
 let unsubscribeSongs = null;
 let unsubscribeSetlists = null;
+let unsubscribeFavorites = null;
 
 function startRealtimeSync() {
   if (!dbFirestore || !state.currentUser) return;
@@ -690,12 +695,20 @@ function startRealtimeSync() {
   if (unsubscribeSetlists) unsubscribeSetlists();
   
   if (state.currentUser.isAnonymous) {
+    state.favorites = [];
     dbGetAllSetlists(db).then(setlists => {
       state.setlists = setlists || [];
       renderToolbarSetlistSelect();
       renderSidebar();
     });
   } else {
+    if (unsubscribeFavorites) unsubscribeFavorites();
+    unsubscribeFavorites = dbFirestore.collection('users').doc(uid).onSnapshot(doc => {
+      state.favorites = doc.data()?.favorites || [];
+      sortSongs();
+      renderSongList();
+    }, (err) => console.error("Favorites sync error:", err));
+
     const setlistsRef = dbFirestore.collection('setlists');
     
     let ownedSetlists = [];
@@ -730,8 +743,15 @@ function startRealtimeSync() {
 }
 
 function sortSongs() {
-  state.songs.sort((a, b) => a.title.localeCompare(b.title));
-  state.filteredSongs.sort((a, b) => a.title.localeCompare(b.title));
+  const sortFn = (a, b) => {
+    const aFav = state.favorites.includes(a.id);
+    const bFav = state.favorites.includes(b.id);
+    if (aFav && !bFav) return -1;
+    if (!aFav && bFav) return 1;
+    return a.title.localeCompare(b.title);
+  };
+  state.songs.sort(sortFn);
+  state.filteredSongs.sort(sortFn);
 }
 
 function loadSettings() {
@@ -2186,6 +2206,85 @@ function bindEvents(db) {
     });
   }
 
+  // Jamming Modal Controls
+  if (el.dashboardJammingBtn) {
+    el.dashboardJammingBtn.addEventListener('click', () => {
+      const modal = document.getElementById('jamming-modal');
+      if (modal) modal.classList.add('active');
+    });
+  }
+
+  const closeJammingModal = () => {
+    const modal = document.getElementById('jamming-modal');
+    if (modal) modal.classList.remove('active');
+  };
+
+  const closeJammingBtn = document.getElementById('close-jamming-modal-btn');
+  if (closeJammingBtn) closeJammingBtn.addEventListener('click', closeJammingModal);
+  
+  const cancelJammingBtn = document.getElementById('cancel-jamming-modal-btn');
+  if (cancelJammingBtn) cancelJammingBtn.addEventListener('click', closeJammingModal);
+
+  const generateJammingBtn = document.getElementById('generate-jamming-btn');
+  if (generateJammingBtn) {
+    generateJammingBtn.addEventListener('click', async () => {
+      const langSelect = document.getElementById('jamming-language');
+      const countInput = document.getElementById('jamming-count');
+      const lang = langSelect ? langSelect.value : 'all';
+      let count = countInput ? parseInt(countInput.value, 10) : 20;
+      if (isNaN(count) || count < 1) count = 20;
+
+      let available = [];
+      if (state.songs && Array.isArray(state.songs)) {
+        available = state.songs.filter(s => {
+          if (lang === 'hebrew') return s.isRTL === true;
+          if (lang === 'english') return s.isRTL === false;
+          return true; // all
+        });
+      }
+
+      // Weighted random sampling without replacement (A-Res algorithm)
+      available.sort((a, b) => {
+        const wA = (state.favorites && state.favorites.includes(a.id)) ? 4 : 1;
+        const wB = (state.favorites && state.favorites.includes(b.id)) ? 4 : 1;
+        const keyA = Math.pow(Math.random(), 1 / wA);
+        const keyB = Math.pow(Math.random(), 1 / wB);
+        return keyB - keyA; // descending order of keys
+      });
+
+      const selected = available.slice(0, count).map(s => ({ songId: s.id }));
+
+      const now = new Date();
+      const dateStr = now.toLocaleDateString();
+      const newSetlist = {
+        id: 'setlist_' + Date.now(),
+        name: `Jam Session - ${dateStr}`,
+        songs: selected,
+        isShared: false
+      };
+
+      try {
+        if (state.currentUser && !state.currentUser.isAnonymous) {
+          if (db) await dbPutSetlist(db, newSetlist);
+        } else {
+          if (db) await dbPutSetlist(db, newSetlist);
+          state.setlists.push(newSetlist);
+        }
+        state.activeSetlistId = newSetlist.id;
+        state.activeSetlistSongIndex = null;
+        state.activeTab = 'setlists';
+
+        showToast("Jamming Setlist created.");
+        renderToolbarSetlistSelect();
+        renderSidebar();
+        closeJammingModal();
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to create setlist.");
+      }
+    });
+  }
+
   if (el.setlistBackBtn) {
     el.setlistBackBtn.addEventListener('click', () => {
       state.activeSetlistId = null;
@@ -2795,9 +2894,18 @@ function renderSongList() {
     const langTag = song.isRTL ? '<span style="font-size: 0.7rem; background: var(--border-color); padding: 1px 4px; border-radius: 4px; color: var(--text-secondary);">עב</span>' : '';
     const keyLabel = song.key ? `<span style="font-family: 'JetBrains Mono', monospace; font-weight: bold;">${song.key}</span>` : '';
 
+    const isLoggedIn = state.currentUser && !state.currentUser.isAnonymous;
+    const isFav = state.favorites && state.favorites.includes(song.id);
+    const favIcon = isFav ? 'star' : 'star_border';
+    const favColor = isFav ? '#ea580c' : 'var(--text-secondary)';
+    const favHtml = isLoggedIn ? `<span class="material-symbols-outlined favorite-btn" data-id="${song.id}" style="color: ${favColor}; font-size: 1.1rem; cursor: pointer; margin-right: 0.4rem; flex-shrink: 0;" title="Toggle Favorite">${favIcon}</span>` : '';
+
     item.innerHTML = `
-      <span class="song-title">${escapeHTML(song.title)}</span>
-      <div class="song-details">
+      <div style="display: flex; align-items: center; margin-bottom: 2px;">
+        ${favHtml}
+        <span class="song-title" style="flex: 1; word-break: break-word;">${escapeHTML(song.title)}</span>
+      </div>
+      <div class="song-details" style="margin-left: 1.5rem;">
         <span>${escapeHTML(song.artist)}</span>
         <div style="display: flex; gap: 0.4rem; align-items: center;">
           ${langTag}
@@ -2805,6 +2913,32 @@ function renderSongList() {
         </div>
       </div>
     `;
+
+    const favBtn = item.querySelector('.favorite-btn');
+    if (favBtn) {
+      favBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = favBtn.getAttribute('data-id');
+        let newFavs = [...state.favorites];
+        if (newFavs.includes(id)) {
+          newFavs = newFavs.filter(fid => fid !== id);
+        } else {
+          newFavs.push(id);
+        }
+        
+        state.favorites = newFavs;
+        sortSongs();
+        renderSongList();
+
+        if (state.currentUser && !state.currentUser.isAnonymous) {
+          try {
+            await dbFirestore.collection('users').doc(state.currentUser.uid).set({ favorites: newFavs }, { merge: true });
+          } catch (err) {
+            console.error("Failed to save favorites to cloud", err);
+          }
+        }
+      });
+    }
 
     item.addEventListener('click', () => {
       state.currentSongId = song.id;
