@@ -105,7 +105,7 @@ abstract class BundleHtmlTask : DefaultTask() {
         val rootDir = projectDir.get().asFile
         try {
             // Now run sync_android.py to ensure the updated web/ directory is synced into Android assets
-            val syncProcess = ProcessBuilder("python", "scripts/sync_android.py")
+            val syncProcess = ProcessBuilder("python", "scripts_and_tools/sync_android.py")
                 .directory(rootDir)
                 .redirectErrorStream(true)
                 .start()
