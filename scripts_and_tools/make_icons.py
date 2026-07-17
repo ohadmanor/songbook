@@ -15,7 +15,8 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
     
-    source_path = r"C:\Users\Manor\.gemini\antigravity-ide\brain\9ba10f9c-c6a5-486f-88f6-813f39a824bb\chordbook_app_icon_cream_1781634650033.png"
+    import sys
+    source_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(project_root, "icon.png")
     if not os.path.exists(source_path):
         print(f"Error: Source image not found at {source_path}")
         return

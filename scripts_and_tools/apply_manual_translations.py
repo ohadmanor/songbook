@@ -6,8 +6,8 @@ def main():
     project_root = os.path.dirname(script_dir)
     songs_file = os.path.join(project_root, 'web', 'songs.json')
     js_songs_file = os.path.join(project_root, 'web', 'songs-data.js')
-    cache_file = os.path.join(project_root, 'scripts', 'artist_cache.json')
-    translation_file = os.path.join(project_root, 'scripts', 'artist_translation.json')
+    cache_file = os.path.join(project_root, 'scripts_and_tools', 'artist_cache.json')
+    translation_file = os.path.join(project_root, 'scripts_and_tools', 'artist_translation.json')
 
     manual_overrides = {
         "Noar Shulaim": "נוער שוליים",

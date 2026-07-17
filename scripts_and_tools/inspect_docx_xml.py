@@ -8,7 +8,10 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
-docx_path = 'import_songs/אהבה בת עשרים.docx'
+if len(sys.argv) < 2:
+    print("Usage: python inspect_docx_xml.py <path_to_docx>")
+    sys.exit(1)
+docx_path = sys.argv[1]
 ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
 
 with zipfile.ZipFile(docx_path) as docx:

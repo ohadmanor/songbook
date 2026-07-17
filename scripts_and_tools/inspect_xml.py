@@ -1,7 +1,11 @@
 import zipfile
 
-docx_path = r"C:\Users\Manor\.gemini\antigravity\scratch\songbook\import_songs\Misirlou.docx"
+import sys
 
+if len(sys.argv) < 2:
+    print("Usage: python inspect_xml.py <path_to_docx>")
+    sys.exit(1)
+docx_path = sys.argv[1]
 try:
     with zipfile.ZipFile(docx_path) as docx:
         # List all files inside the zip

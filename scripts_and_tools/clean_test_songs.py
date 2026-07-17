@@ -1,9 +1,12 @@
 import json
 import os
 
-db_path = r"C:\dev\songbook\songs_db\songbook_backup.json"
-songs_data_path = r"C:\dev\songbook\web\songs-data.js"
-manual_edits_path = r"C:\dev\songbook\scripts\manual_edits.json"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+
+db_path = os.path.join(PROJECT_ROOT, "songs_db", "songbook_backup.json")
+songs_data_path = os.path.join(PROJECT_ROOT, "web", "songs-data.js")
+manual_edits_path = os.path.join(SCRIPT_DIR, "manual_edits.json")
 
 # 1. Clean songbook_backup.json
 if os.path.exists(db_path):
@@ -45,7 +48,7 @@ if os.path.exists(manual_edits_path):
 
 # 3. Clean web/songs-data.js
 # We can regenerate songs-data.js by running restore_backup.py since it reads from songbook_backup.json
-# Let's import or run scripts/restore_backup.py
+# Let's import or run scripts_and_tools/restore_backup.py
 print("Regenerating web/songs-data.js...")
 import subprocess
-subprocess.run(["python", r"C:\dev\songbook\scripts\restore_backup.py"])
+subprocess.run(["python", os.path.join(SCRIPT_DIR, "restore_backup.py")])

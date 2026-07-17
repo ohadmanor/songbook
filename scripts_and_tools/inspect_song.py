@@ -1,10 +1,13 @@
 import json
 
+import sys
+
 with open('web/songs.json', 'r', encoding='utf-8') as f:
     songs = json.load(f)
 
+search_title = sys.argv[1] if len(sys.argv) > 1 else 'עטור מצחך'
 for s in songs:
-    if 'עטור מצחך' in s['title']:
+    if search_title in s['title']:
         title_esc = s['title'].encode('ascii', 'xmlcharrefreplace').decode()
         print("Title:", title_esc)
         print("isRTL:", s['isRTL'])

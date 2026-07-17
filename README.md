@@ -35,7 +35,7 @@ It is distributed as both a **standalone portable HTML sheet** (for any browser 
 ```mermaid
 graph TD
     A[web/ Front-end] -->|IndexedDB: songs & setlists & pre_restore| B(Local Browser Storage)
-    A -->|API endpoints| C[scripts/server.py]
+    A -->|API endpoints| C[scripts_and_tools/server.py]
     C -->|Updates| D[web/songs-data.js]
     C -->|Bundles| E[outputs/songbook.html]
     A -->|Sync script| F[android/app/src/main/assets/www]
@@ -56,17 +56,17 @@ A native Android project configured to wrap the web assets locally in a WebView.
 
 ## 📋 Dev Scripts & Pipeline
 
-All utility scripts are written in Python and located in the [scripts/](file:///c:/dev/songbook/scripts) directory.
+All utility scripts are written in Python and located in the [scripts_and_tools/](file:///c:/dev/songbook/scripts) directory.
 
 ### 1. Development & Sync Server
 Run the local dev server to host the web app and capture song edits made directly in the UI to save them back to your local disk:
 ```bash
-python scripts/server.py
+python scripts_and_tools/server.py
 ```
-* **Default Port**: `8080` (can be overridden, e.g. `python scripts/server.py 9000`).
+* **Default Port**: `8080` (can be overridden, e.g. `python scripts_and_tools/server.py 9000`).
 * Serves the front-end at `http://localhost:8080`.
 * **Sync API Endpoints**:
-  - `POST /api/save-song`: Automatically writes edits to `scripts/manual_edits.json`, updates `web/songs-data.js`, and rebuilds assets.
+  - `POST /api/save-song`: Automatically writes edits to `scripts_and_tools/manual_edits.json`, updates `web/songs-data.js`, and rebuilds assets.
   - `POST /api/delete-song`: Synchronizes song deletions across edits and main files on disk.
   - `POST /api/restore-backup`: Restores a user-uploaded database backup, performs a safety backup of disk configurations, aligns `manual_edits.json` automatically, and triggers a clean rebuild.
   - `GET /api/check-undo-available`: Checks if a pre-restore backup exists on disk.
@@ -75,19 +75,19 @@ python scripts/server.py
 ### 2. Standalone HTML Bundler
 Inlines all frontend assets (HTML, CSS, JS, external libraries, and song data) into a single standalone file in `outputs/`:
 ```bash
-python scripts/bundle_app.py
+python scripts_and_tools/bundle_app.py
 ```
 
 ### 3. Android Project Sync
 Synchronizes the compiled web frontend files directly with the Android project's assets:
 ```bash
-python scripts/sync_android.py
+python scripts_and_tools/sync_android.py
 ```
 
 ### 4. Docx Word Document Parser
 Imports and parses `.docx` songsheets from the `import_songs/` directory:
 ```bash
-python scripts/parse_docs.py
+python scripts_and_tools/parse_docs.py
 ```
 * Parses `.docx` file zip structure natively without external Python library dependencies.
 * Identifies RTL (Hebrew) vs LTR (English) songs automatically.
@@ -101,14 +101,14 @@ python scripts/parse_docs.py
 ### 1. Web Release Build
 Run the following script to bundle your files into a single HTML document:
 ```bash
-python scripts/bundle_app.py
+python scripts_and_tools/bundle_app.py
 ```
 The output file [songbook.html](file:///c:/Develop/Github/songbook/outputs/songbook.html) can be opened in any browser.
 
 ### 2. Android APK Release Build
 1. Sync the latest web changes with the Android assets folder:
    ```bash
-   python scripts/sync_android.py
+   python scripts_and_tools/sync_android.py
    ```
 2. Build the release APK via Gradle (requires JDK 17 or 21):
    ```bash
