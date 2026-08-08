@@ -70,6 +70,14 @@
 }
 
 /* Global Reset and Base Styles */
+html {
+  /* Disable mobile browsers' automatic font-boosting (text autosizer), which can
+     inflate the chord line and lyric line of a chord-lyric-pair by different
+     amounts and break the whitespace-based chord/lyric alignment on mobile. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -474,13 +482,17 @@ body {
 .chord-lyric-pair .lyric-only-line {
   margin-bottom: 0;
   line-height: 1.4;
-  font-family: Arial, sans-serif;
+  /* Must be a webfont (not an OS font like Arial) so glyph widths are identical
+     on every platform -- Android has no Arial and substitutes a different font
+     per-script (Latin vs Hebrew), which desyncs the whitespace-based chord
+     alignment between this line and the lyric line below it. */
+  font-family: 'Inter', sans-serif;
   white-space: pre-wrap;
   unicode-bidi: plaintext;
 }
 
 .chord-lyric-pair .chord {
-  font-family: Arial, sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 1em;
   padding: 0;
   background-color: transparent;
