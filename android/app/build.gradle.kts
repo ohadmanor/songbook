@@ -1,7 +1,20 @@
+// Imported rather than written as java.util.Properties: inside a Kotlin DSL
+// script `java` resolves to the Java plugin extension, not the package root.
+import java.util.Properties
+
+// The Compose compiler and kotlinx-serialization plugins are gone along with the
+// Compose UI layer: MainActivity calls setContentView(webView) and never
+// setContent {}, so none of that code was ever reachable from the running app.
+//
+// No Kotlin plugin is listed here on purpose -- AGP 9 has built-in Kotlin support
+// and hard-errors if org.jetbrains.kotlin.android is applied alongside it. One
+// consequence worth knowing: the Kotlin version was previously pinned to 2.3.20
+// only as a side effect of those two Kotlin compiler plugins, and now comes from
+// whatever AGP bundles (2.2.10 for AGP 9.0.1). Pinning it independently needs
+// kotlin.compilerVersion, which is still an experimental opt-in API, so the
+// bundled version stands. Nothing in this module uses version-specific Kotlin.
 plugins {
   alias(libs.plugins.android.application)
-  alias(libs.plugins.compose.compiler)
-  alias(libs.plugins.kotlin.serialization)
 }
 
 base {
@@ -15,16 +28,35 @@ android {
         applicationId = "com.mymusic.songbook"
         minSdk = 23
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.5.7"
+        versionCode = 16
+        versionName = "1.6.0"
     }
+
+    // Signing credentials come from android/local.properties (git-ignored) or the
+    // environment, never from this file: it is committed, so a password written
+    // here is a published password. Existing setups keep working -- the previous
+    // literals remain as the final fallback -- but rotating the keystore password
+    // and putting the new one in local.properties now keeps it out of history.
+    //
+    // android/local.properties:
+    //   songbook.storePassword=...
+    //   songbook.keyAlias=songbook
+    //   songbook.keyPassword=...
+    val localProps = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { stream -> load(stream) }
+    }
+    fun signingSecret(key: String, fallback: String): String =
+        localProps.getProperty("songbook.$key")
+            ?: System.getenv("SONGBOOK_${key.uppercase()}")
+            ?: fallback
 
     signingConfigs {
         create("release") {
             storeFile = file("release.keystore")
-            storePassword = "songbook2026"
-            keyAlias = "songbook"
-            keyPassword = "songbook2026"
+            storePassword = signingSecret("storePassword", "songbook2026")
+            keyAlias = signingSecret("keyAlias", "songbook")
+            keyPassword = signingSecret("keyPassword", "songbook2026")
         }
     }
 
@@ -40,7 +72,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
-      compose = true
       aidl = false
       buildConfig = false
       shaders = false
@@ -57,38 +88,21 @@ kotlin {
     jvmToolchain(17)
 }
 
+// The app is a WebView shell. These four are what MainActivity actually touches;
+// the Compose BOM, Material3, navigation3 and the lifecycle/viewmodel Compose
+// artifacts were all shipping in the APK without a single reachable call site.
 dependencies {
-  val composeBom = platform(libs.androidx.compose.bom)
-  implementation(composeBom)
-  androidTestImplementation(composeBom)
+  // ComponentActivity, registerForActivityResult, OnBackPressedCallback
+  implementation(libs.androidx.activity.ktx)
 
-  // Core Android dependencies
+  // FileProvider, used by WebAppInterface.shareTextFile
   implementation(libs.androidx.core.ktx)
-  implementation(libs.androidx.lifecycle.runtime.ktx)
-  implementation(libs.androidx.activity.compose)
 
-  // Arch Components
-  implementation(libs.androidx.lifecycle.runtime.compose)
-  implementation(libs.androidx.lifecycle.viewmodel.compose)
-
-  // Compose
-  implementation(libs.androidx.compose.ui)
-  implementation(libs.androidx.compose.ui.tooling.preview)
-  implementation(libs.androidx.compose.material3)
-  // Tooling
-  debugImplementation(libs.androidx.compose.ui.tooling)
-
-
-  // Navigation
-  implementation(libs.androidx.navigation3.ui)
-  implementation(libs.androidx.navigation3.runtime)
-  implementation(libs.androidx.lifecycle.viewmodel.navigation3)
-
-  // WebKit for secure WebView loading (WebViewAssetLoader)
-  implementation("androidx.webkit:webkit:1.12.0")
+  // WebViewAssetLoader / WebViewClientCompat for secure local asset loading
+  implementation(libs.androidx.webkit)
 
   // Google Sign-In Native Auth
-  implementation("com.google.android.gms:play-services-auth:21.1.1")
+  implementation(libs.play.services.auth)
 }
 
 // Ensure web assets are bundled and synced before compiling the APK

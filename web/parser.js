@@ -1,31 +1,11 @@
 /**
  * parser.js
- * Parses raw chord sheet text (with chords above lyrics) into structured JSON/HTML segments.
+ * Parses raw chord sheet text (with chords above lyrics) into structured blocks:
+ * section headers, images, and paragraphs of chord / lyric / chord-lyric lines.
  */
 
 // Import or reference Transposer
 const transposer = typeof window !== 'undefined' ? window.Transposer : require('./transposer');
-
-// Arial character widths (normalized to a standard scale where average characters are ~500)
-const ARIAL_WIDTHS = {
-  ' ': 278, '#': 556, '/': 278, '\\': 278, '-': 333,
-  '(': 333, ')': 333, '[': 333, ']': 333, '{': 333, '}': 333,
-  '+': 584, '|': 222, '*': 389, '~': 584,
-  '0': 556, '1': 556, '2': 556, '3': 556, '4': 556, '5': 556, '6': 556, '7': 556, '8': 556, '9': 556,
-  'A': 667, 'B': 667, 'C': 722, 'D': 722, 'E': 667, 'F': 611, 'G': 778, 'H': 722, 'I': 278, 'J': 500,
-  'K': 667, 'L': 556, 'M': 833, 'N': 722, 'O': 778, 'P': 667, 'Q': 778, 'R': 722, 'S': 667, 'T': 611,
-  'U': 722, 'V': 667, 'W': 944, 'X': 667, 'Y': 667, 'Z': 611,
-  'a': 556, 'b': 556, 'c': 500, 'd': 556, 'e': 556, 'f': 278, 'g': 556, 'h': 556, 'i': 222, 'j': 222,
-  'k': 500, 'l': 222, 'm': 833, 'n': 556, 'o': 556, 'p': 556, 'q': 556, 'r': 333, 's': 500, 't': 278,
-  'u': 556, 'v': 500, 'w': 722, 'x': 500, 'y': 500, 'z': 500,
-  'א': 611, 'ב': 556, 'ג': 500, 'ד': 556, 'ה': 556, 'ו': 278, 'ז': 333, 'ח': 556, 'ט': 556, 'י': 278,
-  'ך': 444, 'כ': 556, 'ל': 556, 'ם': 667, 'מ': 667, 'ן': 278, 'נ': 556, 'ס': 556, 'ע': 611, 'ף': 444,
-  'פ': 556, 'ץ': 444, 'צ': 556, 'ק': 556, 'ר': 556, 'ש': 722, 'ת': 556
-};
-
-function getCharWidth(c) {
-  return ARIAL_WIDTHS[c] || 500;
-}
 
 /**
  * Checks if a token is a valid chord symbol.
@@ -47,6 +27,18 @@ function isValidChordToken(token) {
 
 // Prefix patterns for Hebrew and English intro / instrumental / outro lines
 const INTRO_PREFIX_REGEX = /^(פתיחה|מעבר|סולו|סיום|מבוא|אינטרו|קודה|Intro|Outro|Solo|Bridge|Bass|BASS|Guitar|Drums|Flute|Violin|Coda|Mute)\s*:?\s*/i;
+
+// Words that appear inside a chord line as a performance instruction rather
+// than as lyrics, e.g. "Bass: // Cm // x3" or "// D // x3 fast". They must not
+// count against the line when isChordLine() decides whether it is really lyrics.
+const INSTRUCTION_WORD_REGEX = /^(?:Solo|Drums|Mute|Bass|Guitar|Stop|Play|Fast|Slow)$/i;
+
+// Punctuation to discount when measuring how "word-like" a token is. Note this
+// strips punctuation ONLY -- an earlier version of this class also contained the
+// letters of the word "Israel", which silently shortened any token built from
+// I/s/r/a/e/l and let plain lyric lines ("and the sky is grey", "It's 6 a.m. and
+// I'm alone") pass as chord lines.
+const TOKEN_PUNCTUATION_REGEX = /[()\[\].,!?;:"'\s]/g;
 
 /**
  * Checks if a line contains only chords and spaces.
@@ -74,9 +66,10 @@ function isChordLine(line) {
     if (isValidChordToken(token)) {
       chordCount++;
     } else {
-      // If a word is long and not a chord or symbol, this is likely a lyrics line
-      const cleanToken = token.replace(/[()\[\].,!?;:"' Israel]/g, '').trim();
-      if (cleanToken.length > 2) {
+      // If a word is long and not a chord, symbol or performance instruction,
+      // this is likely a lyrics line
+      const cleanToken = token.replace(TOKEN_PUNCTUATION_REGEX, '').trim();
+      if (cleanToken.length > 2 && !INSTRUCTION_WORD_REGEX.test(cleanToken)) {
         return false;
       }
     }
@@ -121,134 +114,6 @@ function extractChords(line) {
   }
   
   return chords;
-}
-
-/**
- * Aligns a chord line with a lyric line by breaking them into segments.
- * @param {string} chordLine 
- * @param {string} lyricLine 
- * @returns {Array<{chord: string|null, text: string}>}
- */
-function alignChordsAndLyrics(chordLine, lyricLine) {
-  const isRTL = detectHebrew(lyricLine);
-  const lyricLen = lyricLine ? lyricLine.length : 0;
-  
-  if (lyricLen === 0) {
-    const chords = extractChords(chordLine);
-    return chords.map(c => ({
-      text: '',
-      chords: [{ chord: c.text, offset: c.index * 500 }]
-    }));
-  }
-  
-  // 1. Tokenize lyric line into word/space segments
-  const tokenRegex = /\S+|\s+/g;
-  let match;
-  const tokens = [];
-  while ((match = tokenRegex.exec(lyricLine)) !== null) {
-    tokens.push({
-      text: match[0],
-      start: match.index,
-      end: tokenRegex.lastIndex
-    });
-  }
-  
-  // 2. Compute visual offsets
-  const chordOffsets = [0];
-  let currentChordOffset = 0;
-  for (let i = 0; i < chordLine.length; i++) {
-    currentChordOffset += getCharWidth(chordLine[i]);
-    chordOffsets.push(currentChordOffset);
-  }
-  const chordWidth = currentChordOffset;
-  
-  const lyricOffsets = [0];
-  let currentLyricOffset = 0;
-  let jIdx = 0;
-  while (jIdx < lyricLine.length) {
-    if (lyricLine.substring(jIdx, jIdx + 2) === '**' || lyricLine.substring(jIdx, jIdx + 2) === '==' || lyricLine.substring(jIdx, jIdx + 2) === '%%') {
-      lyricOffsets.push(currentLyricOffset);
-      lyricOffsets.push(currentLyricOffset);
-      jIdx += 2;
-    } else {
-      currentLyricOffset += getCharWidth(lyricLine[jIdx]);
-      lyricOffsets.push(currentLyricOffset);
-      jIdx++;
-    }
-  }
-  const lyricWidth = currentLyricOffset;
-  
-  const scale = chordWidth > lyricWidth ? lyricWidth / chordWidth : 1.0;
-  
-  const chords = extractChords(chordLine);
-  const mappedChords = chords.map(chord => {
-    // For matching with the lyric character, we use the chord's LEFT edge
-    const chordLeftOffset = chordOffsets[chord.index] * scale;
-    const chordLeftOffsetAdjusted = isRTL ? (chordWidth * scale - chordLeftOffset) : chordLeftOffset;
-    
-    let minDiff = Infinity;
-    let closestIdx = 0;
-    for (let j = 0; j < lyricOffsets.length; j++) {
-      const targetOffset = lyricOffsets[j];
-      const diff = Math.abs(targetOffset - chordLeftOffsetAdjusted);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestIdx = j;
-      }
-    }
-    
-    // For the actual positioning, we use the edge that CSS positions:
-    // In LTR: CSS uses 'left', so we output the LEFT edge.
-    // In RTL: CSS uses 'right', so we output the RIGHT edge.
-    const chordRightOffset = chordOffsets[chord.index + chord.text.length] * scale;
-    const targetOffset = isRTL ? (chordWidth * scale - chordRightOffset) : chordLeftOffset;
-    const chordWidthScaled = (chordOffsets[chord.index + chord.text.length] - chordOffsets[chord.index]) * scale;
-    
-    return {
-      text: chord.text,
-      index: Math.min(lyricLen - 1, closestIdx),
-      targetOffset: targetOffset,
-      width: chordWidthScaled
-    };
-  });
-  
-  // 3. Build output segments by matching chords to tokens
-  const outputSegments = tokens.map(token => {
-    const tokenChords = [];
-    const tokenWidth = lyricOffsets[token.end] - lyricOffsets[token.start];
-    const tokenStartOffset = lyricOffsets[token.start];
-    
-    mappedChords.forEach(mc => {
-      if (mc.index >= token.start && mc.index < token.end) {
-        let offsetInToken = mc.targetOffset - tokenStartOffset;
-        
-        if (isRTL) {
-          const chordWidthScaled = mc.width;
-          const minOffset = -chordWidthScaled;
-          const maxOffset = tokenWidth - chordWidthScaled;
-          if (offsetInToken < minOffset) offsetInToken = minOffset;
-          if (offsetInToken > maxOffset) offsetInToken = maxOffset;
-        } else {
-          if (offsetInToken < 0) offsetInToken = 0;
-          if (offsetInToken > tokenWidth) offsetInToken = tokenWidth;
-        }
-        
-        tokenChords.push({
-          chord: mc.text,
-          offset: offsetInToken
-        });
-      }
-    });
-    
-    tokenChords.sort((a, b) => a.offset - b.offset);
-    
-    return {
-      text: token.text,
-      chords: tokenChords
-    };
-  });
-  
-  return outputSegments;
 }
 
 /**
@@ -316,22 +181,22 @@ function parseSongText(rawText) {
       const nextTrimmed = nextLine.trim();
       
       if (nextTrimmed !== '' && !isHeaderLine(nextLine) && !isChordLine(nextLine)) {
-        // Aligned pair!
-        const alignedSegments = alignChordsAndLyrics(line, nextLine);
+        // Aligned pair. Only the raw lines are kept: the renderer lays the chord
+        // row over the lyric row using the original whitespace plus white-space:
+        // pre-wrap, and never read the pixel-offset segments this used to compute
+        // -- via an Arial width table and a nearest-offset search -- for every
+        // line of every song on every render.
         currentParagraph.lines.push({
           type: 'chord-lyric',
           rawChordLine: line,
-          rawLyricLine: nextLine,
-          segments: alignedSegments
+          rawLyricLine: nextLine
         });
         i++; // skip next line as it is consumed
       } else {
         // Chord line with no lyrics following it (instrumental / intro line)
-        const alignedSegments = alignChordsAndLyrics(line, '');
         currentParagraph.lines.push({
           type: 'chord-only',
-          rawLine: line,
-          segments: alignedSegments
+          rawLine: line
         });
       }
     } else {
@@ -361,7 +226,7 @@ function detectHebrew(text) {
 
 // Export for ES modules and window global if loaded directly in browser
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseSongText, isChordLine, isHeaderLine, alignChordsAndLyrics, detectHebrew, extractChords, getCharWidth };
+  module.exports = { parseSongText, isChordLine, isHeaderLine, detectHebrew, extractChords };
 } else {
-  window.SongParser = { parseSongText, isChordLine, isHeaderLine, alignChordsAndLyrics, detectHebrew, extractChords, getCharWidth };
+  window.SongParser = { parseSongText, isChordLine, isHeaderLine, detectHebrew, extractChords };
 }

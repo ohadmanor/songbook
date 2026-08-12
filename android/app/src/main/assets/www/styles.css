@@ -1,7 +1,18 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+/* The Google Fonts request lives in index.html's <link> tag, which carries the
+   union of the weights this sheet uses. It used to be issued twice -- once there
+   and once from an @import on this line -- and the @import copy was the worse of
+   the two: a stylesheet cannot start fetching it until the stylesheet itself has
+   arrived, so it serialised two round trips before any text could paint. */
 
 /* CSS Variables for Themes */
 :root {
+  /* The song-sheet font stack. The editor textarea and the rendered sheet MUST
+     both use this: the chord line is positioned with plain spaces, so a chord
+     only lands over the syllable you aimed it at while the text you typed and
+     the text you read are measured by the very same fonts. Not theme-dependent
+     -- the theme blocks below override colours only. */
+  --song-font: 'Inter', 'Rubik', 'Arimo', Arial, sans-serif;
+
   /* Light Theme (Stitch Technical Minimalism) */
   --bg-primary: #faf8ff;
   --bg-secondary: #ededf9;
@@ -69,6 +80,97 @@
   --shadow-lg: 0 0 0 transparent;
 }
 
+/* Self-hosted fonts for the song body. A chord-lyric-pair is two independent
+   text lines whose horizontal correspondence rests entirely on both lines
+   measuring their characters with the very same fonts. Inter contains NO
+   Hebrew (U+0590-05FF), so Hebrew silently fell through to whatever the
+   platform calls `sans-serif` -- Arial on Windows, a Noto/Roboto Hebrew on
+   Android -- and that is precisely why the chords sat over different words on
+   desktop and on the phone.
+
+   Rubik supplies the Hebrew: of the Hebrew webfonts on Google Fonts its advance
+   widths are the closest to Windows Arial (1.2% RMS drift in prefix width
+   across all 43k Hebrew lines in the song DB, vs 4.6% for Arimo and 3.2% for
+   Heebo), so pinning it keeps the desktop rendering essentially where it is
+   today while dragging mobile onto the same layout.
+
+   Arimo backs up the Latin half: it is metric-compatible with Arial, so if
+   Inter ever fails to arrive from the CDN both platforms degrade to the same
+   widths instead of to two different system fonts.
+
+   Both are served from our own origin so they resolve identically inside the
+   offline Android WebView, and font-display: block keeps the chords from
+   painting against a fallback and then jumping. */
+@font-face {
+  font-family: 'Rubik';
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: block;
+  src: url('fonts/rubik-hebrew.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+
+@font-face {
+  font-family: 'Arimo';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url('fonts/arimo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Material Symbols, self-hosted for the same reason as the two above: it used to
+   arrive only from the Google Fonts CDN, so in the offline Android WebView every
+   icon in the app fell back to its own name and the UI read "download", "delete",
+   "arrow_back", "more_vert" in plain text where a glyph belonged.
+
+   The file is a 29-icon subset -- exactly the names this app renders -- which is
+   why it costs 29 KB instead of the ~4 MB of the full set. ADDING A NEW ICON NAME
+   ANYWHERE IN THE APP MEANS REGENERATING THIS SUBSET, otherwise the new icon is
+   the one that shows up as a word. Regenerate with:
+
+     curl -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+       AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
+       "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:\
+opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=<comma,separated,names>"
+
+   then download the fonts.gstatic.com URL out of the returned @font-face. The
+   User-Agent matters: without a browser UA Google serves TrueType, not woff2.
+   Icons currently subset in (keep this list in step with the file):
+     add, album, analytics, arrow_back, celebration, cloud_done, dark_mode,
+     data_object, delete, download, edit, format_bold, format_color_fill,
+     fullscreen, light_mode, list_alt, lock, lock_open, mic, more_vert,
+     music_note, piano, save, share, shuffle, star, star_border, upload_file,
+     visibility */
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('fonts/material-symbols-subset.woff2') format('woff2');
+}
+
+/* Base icon rule, previously supplied by the CDN stylesheet. The 'liga' feature
+   is what turns the text content ("delete") into the glyph, so it is required,
+   not cosmetic. Every more specific .material-symbols-outlined rule later in this
+   file still overrides the size set here. */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}
+
 /* Global Reset and Base Styles */
 html {
   /* Disable mobile browsers' automatic font-boosting (text autosizer), which can
@@ -86,7 +188,7 @@ html {
 }
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', 'Rubik', 'Arimo', sans-serif;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   height: 100vh;
@@ -422,7 +524,7 @@ body {
 }
 
 .song-container.rtl .song-header h1 {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', 'Rubik', 'Arimo', sans-serif;
 }
 
 .song-header {
@@ -457,7 +559,7 @@ body {
 }
 
 .song-container.rtl .song-section-header {
-  font-family: 'Inter', sans-serif; /* Cleaner Hebrew sans-serif */
+  font-family: 'Inter', 'Rubik', 'Arimo', sans-serif; /* Cleaner Hebrew sans-serif */
 }
 
 .song-paragraph {
@@ -482,17 +584,25 @@ body {
 .chord-lyric-pair .lyric-only-line {
   margin-bottom: 0;
   line-height: 1.4;
-  /* Must be a webfont (not an OS font like Arial) so glyph widths are identical
-     on every platform -- Android has no Arial and substitutes a different font
-     per-script (Latin vs Hebrew), which desyncs the whitespace-based chord
-     alignment between this line and the lyric line below it. */
-  font-family: 'Inter', sans-serif;
+  /* Every script here must resolve to a webfont, never to an OS font: Inter
+     covers Latin, Rubik covers the Hebrew that Inter lacks, Arimo backstops
+     Latin offline. Leaving any of it to the platform default is what desyncs
+     this line from the lyric line below it, since the whitespace-based
+     alignment only holds while both lines measure their characters with the
+     very same fonts. */
+  font-family: var(--song-font);
+  /* Declared on BOTH lines on purpose. .lyric-only-line carries font-size:
+     1.05em of its own, so leaving the chord line at the inherited 1em stretched
+     the lyrics 5% wider than the chord row that is supposed to index into them,
+     and every chord crept along its line -- in the editor, where one textarea
+     sets one size for both, that drift does not exist. Keep these equal. */
+  font-size: 1.05em;
   white-space: pre-wrap;
   unicode-bidi: plaintext;
 }
 
 .chord-lyric-pair .chord {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--song-font);
   font-size: 1em;
   padding: 0;
   background-color: transparent;
@@ -524,7 +634,7 @@ body {
 }
 
 .lyric-only-line {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--song-font);
   font-size: 1.05em;
   color: var(--text-primary);
   margin-bottom: 0.4rem;
@@ -587,7 +697,7 @@ strong .chord, .chord strong {
 }
 
 .lyric-text {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--song-font);
   font-size: 1.05em;
   color: var(--text-primary);
   white-space: pre;
@@ -747,7 +857,8 @@ strong .chord, .chord strong {
 
 #song-modal .textarea-control {
   min-height: 450px;
-  font-family: Arial, sans-serif;
+  /* Must stay var(--song-font): what you space out here is what gets rendered. */
+  font-family: var(--song-font);
   font-size: 0.95rem;
   line-height: 1.6;
   letter-spacing: 0;
@@ -2022,7 +2133,8 @@ input:checked + .toggle-slider:before {
   border: none;
   background-color: transparent;
   color: var(--text-primary);
-  font-family: Arial, sans-serif;
+  /* Must stay var(--song-font): what you space out here is what gets rendered. */
+  font-family: var(--song-font);
   font-size: 0.95rem;
   line-height: 1.6;
   resize: none;

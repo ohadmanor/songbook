@@ -5,8 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dynamic HTML Songbook</title>
   <link rel="icon" type="image/png" href="favicon.png">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700&family=JetBrains+Mono:wght@700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=16">
+  <!-- The single Google Fonts request for the whole app. The weight lists are the
+       union of what index.html and styles.css ask for; styles.css used to repeat
+       this request through an @import, which cost a second serialised round trip.
+       Material Symbols is no longer requested here -- it is self-hosted from
+       fonts/ so the icons still render when the app runs offline. -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20">
 </head>
 <body>
 
@@ -18,7 +23,7 @@
         <div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1;">
           <img src="favicon.png" alt="Logo" style="width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0;">
           <span class="logo">ChordBook</span>
-          <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700; background: var(--border-color); padding: 2px 6px; border-radius: 12px; border: 1px solid var(--border-color); line-height: 1;">v1.5.7</span>
+          <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700; background: var(--border-color); padding: 2px 6px; border-radius: 12px; border: 1px solid var(--border-color); line-height: 1;">v1.6.0</span>
         </div>
         <button class="btn mobile-menu-btn" id="hide-sidebar-btn">×</button>
       </div>
@@ -692,6 +697,6 @@
   <script src="chord-db.js"></script>
   <script src="songs-data.js"></script>
   <script src="parser.js"></script>
-  <script src="app.js?v=23"></script>
+  <script src="app.js?v=25"></script>
 </body>
 </html>

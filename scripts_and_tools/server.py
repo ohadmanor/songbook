@@ -29,7 +29,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 WEB_DIR = os.path.join(PROJECT_ROOT, 'web')
 EDITS_FILE = os.path.join(SCRIPT_DIR, 'manual_edits.json')
+SONGS_DB_FILE = os.path.join(PROJECT_ROOT, 'songs_db', 'songbook_backup.json')
 PARSE_DOCS_SCRIPT = os.path.join(SCRIPT_DIR, 'parse_docs.py')
+
+# This server exposes unauthenticated endpoints that write to the repository and
+# spawn subprocesses, and the client only ever calls them on localhost. Binding
+# the wildcard address published all of that to every machine on the network.
+HOST = '127.0.0.1'
 
 class SongbookRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -73,11 +79,12 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
             js_file = os.path.join(WEB_DIR, 'songs-data.js')
             safety_backup = js_file + ".pre_restore"
             edits_backup = EDITS_FILE + ".pre_restore"
-            
+            songs_db_backup = SONGS_DB_FILE + ".pre_restore"
+
             if not os.path.exists(safety_backup):
                 self.send_error(400, "No pre-restore backup found on disk")
                 return
-                
+
             # Revert songs-data.js
             print(f"[Server] Reverting songs-data.js from safety backup: {safety_backup}")
             shutil.copy2(safety_backup, js_file)
@@ -85,7 +92,17 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
                 os.remove(safety_backup)
             except Exception as e:
                 print(f"[Server] Warning: Failed to remove {safety_backup}: {e}")
-            
+
+            # Revert the source of truth database alongside it, so the two do not
+            # end up describing different databases after an undo.
+            if os.path.exists(songs_db_backup):
+                print(f"[Server] Reverting songbook_backup.json from safety backup: {songs_db_backup}")
+                shutil.copy2(songs_db_backup, SONGS_DB_FILE)
+                try:
+                    os.remove(songs_db_backup)
+                except Exception as e:
+                    print(f"[Server] Warning: Failed to remove {songs_db_backup}: {e}")
+
             # Revert manual_edits.json
             if os.path.exists(edits_backup):
                 print(f"[Server] Reverting manual_edits.json from safety backup: {edits_backup}")
@@ -159,7 +176,17 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
                     edits_backup = EDITS_FILE + ".pre_restore"
                     print(f"[Server] Creating safety backup of current manual_edits.json at: {edits_backup}")
                     shutil.copy2(EDITS_FILE, edits_backup)
-                
+
+                # Create safety backup of the source of truth database too. It is
+                # overwritten further down, and without a snapshot here
+                # /api/undo-restore had nothing to roll it back to -- it reverted
+                # songs-data.js while leaving the source of truth holding the
+                # restored data, so the next bundle silently reapplied the restore.
+                if os.path.exists(SONGS_DB_FILE):
+                    songs_db_backup = SONGS_DB_FILE + ".pre_restore"
+                    print(f"[Server] Creating safety backup of current songbook_backup.json at: {songs_db_backup}")
+                    shutil.copy2(SONGS_DB_FILE, songs_db_backup)
+
                 # Rebuild manual_edits.json based on restored songs
                 new_edits = {}
                 for song in songs_list:
@@ -187,7 +214,7 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
                 print(f"[Server] Restored custom songs and updated songs-data.js (Version: {new_version})")
 
                 # Also update source of truth database backup file
-                backup_file = os.path.join(PROJECT_ROOT, 'songs_db', 'songbook_backup.json')
+                backup_file = SONGS_DB_FILE
                 try:
                     os.makedirs(os.path.dirname(backup_file), exist_ok=True)
                     with open(backup_file, 'w', encoding='utf-8') as f:
@@ -341,7 +368,7 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
                 print(f"[Server] Error saving songs-data.js: {e}")
 
             # Also update source of truth database backup file
-            backup_file = os.path.join(PROJECT_ROOT, 'songs_db', 'songbook_backup.json')
+            backup_file = SONGS_DB_FILE
             try:
                 os.makedirs(os.path.dirname(backup_file), exist_ok=True)
                 with open(backup_file, 'w', encoding='utf-8') as f:
@@ -442,7 +469,7 @@ class SongbookRequestHandler(SimpleHTTPRequestHandler):
                 print(f"[Server] Error saving songs-data.js: {e}")
 
             # Also update source of truth database backup file
-            backup_file = os.path.join(PROJECT_ROOT, 'songs_db', 'songbook_backup.json')
+            backup_file = SONGS_DB_FILE
             try:
                 os.makedirs(os.path.dirname(backup_file), exist_ok=True)
                 with open(backup_file, 'w', encoding='utf-8') as f:
@@ -479,7 +506,7 @@ def main():
     # Make sure web directory exists
     os.makedirs(WEB_DIR, exist_ok=True)
     
-    server_address = ('', PORT)
+    server_address = (HOST, PORT)
     httpd = HTTPServer(server_address, SongbookRequestHandler)
     print(f"\n========================================================")
     print(f"Custom Songbook Sync Server running at http://localhost:{PORT}")

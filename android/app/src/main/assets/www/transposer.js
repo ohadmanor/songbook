@@ -14,10 +14,18 @@ const NOTE_TO_INDEX = {
 };
 
 /**
- * Transposes a single note (without chords suffixes like 'm7')
+ * The single spelling this app uses for every accidental: sharps for C#/F#,
+ * flats for Eb/Ab/Bb. This is deliberate, not an oversight -- it is the spelling
+ * guitarists here expect, so transposeNote() ALWAYS uses it and ignores its
+ * preferFlats argument. SHARP_SCALE and FLAT_SCALE, the `useFlats` calculation in
+ * transposeChord() and every preferFlats parameter below are therefore inert;
+ * the enharmonic toggle button that once drove them is gone from index.html.
+ * Honouring preferFlats again means changing displayed chords for every song, so
+ * treat it as a product decision rather than a bug to be tidied up.
+ *
  * @param {string} note - The note (e.g., "C", "F#", "Bb")
  * @param {number} semitones - Number of semitones to shift (-11 to 11)
- * @param {boolean} preferFlats - Whether to use the flat scale for the output
+ * @param {boolean} preferFlats - Ignored; see above.
  * @returns {string} The transposed note
  */
 const CUSTOM_SCALE = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];

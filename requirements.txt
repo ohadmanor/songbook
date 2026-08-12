@@ -1,2 +1,10 @@
-debugpy
-agent-dev-cli>=0.0.1b260427
+# Third-party packages the scripts in scripts_and_tools/ actually import.
+# server.py, bundle_app.py, sync_android.py, parse_docs.py and restore_backup.py
+# need nothing beyond the standard library, so a plain checkout can run the dev
+# server and the build pipeline without installing anything.
+
+# scripts_and_tools/make_icons.py  -- from PIL import Image, ImageDraw
+Pillow
+
+# scripts_and_tools/import_pdf.py  -- from pypdf import PdfReader
+pypdf

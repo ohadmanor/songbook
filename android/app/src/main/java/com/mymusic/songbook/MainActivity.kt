@@ -16,6 +16,7 @@ import androidx.webkit.WebViewClientCompat
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import java.io.File
@@ -28,6 +29,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     lateinit var googleSignInClient: GoogleSignInClient
+
+    // Enabled only while the WebView has history to pop; kept in step with the
+    // page stack by doUpdateVisitedHistory below.
+    private val webViewBackCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            webView.goBack()
+        }
+    }
 
     val signInLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -112,6 +121,11 @@ class MainActivity : ComponentActivity() {
                 ): WebResourceResponse? {
                     return assetLoader.shouldInterceptRequest(request.url)
                 }
+
+                override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+                    super.doUpdateVisitedHistory(view, url, isReload)
+                    webViewBackCallback.isEnabled = view.canGoBack()
+                }
             }
             
             webChromeClient = object : WebChromeClient() {
@@ -142,15 +156,17 @@ class MainActivity : ComponentActivity() {
         }
 
         setContentView(webView)
-        webView.loadUrl("https://appassets.androidplatform.net/assets/www/index.html")
-    }
 
-    override fun onBackPressed() {
-        if (::webView.isInitialized && webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
-        }
+        // Back navigation must go through the dispatcher, not onBackPressed().
+        // From targetSdk 35 the predictive back gesture is on by default and the
+        // system stops calling onBackPressed() entirely, so the override this
+        // replaced had gone dead: Back exited the app instead of stepping back
+        // through the WebView's history. The callback stays disabled while there
+        // is nothing to pop, which leaves the system's own "finish the activity"
+        // handling in place at the first page.
+        onBackPressedDispatcher.addCallback(this, webViewBackCallback)
+
+        webView.loadUrl("https://appassets.androidplatform.net/assets/www/index.html")
     }
 
     class WebAppInterface(private val activity: MainActivity) {

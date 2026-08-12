@@ -1,16 +1,48 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // A real, non-guest account. Anonymous sessions exist only so guests can read.
+    function isEditor() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == 'ohad.manor@gmail.com';
+    }
+
     match /songs/{songId} {
+      // Public on purpose: the songbook is meant to be readable by guests, and
+      // the Android WebView cannot always complete anonymous sign-in.
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
-      allow delete: if request.auth != null && request.auth.token.email == 'ohad.manor@gmail.com';
+
+      // Writes are owner-scoped. This collection is shared by every signed-in
+      // account, and the previous rule allowed any of them to overwrite or
+      // tombstone ANY song in the library, not just their own.
+      allow create: if isEditor()
+        && request.resource.data.ownerId == request.auth.uid;
+
+      // The admin retains write access to the whole library, which is also what
+      // keeps the pre-existing songs -- the ones with no ownerId at all -- editable.
+      allow update: if isEditor()
+        && (isAdmin() || resource.data.ownerId == request.auth.uid);
+
+      // Deletes go through an update that sets `deleted: true`; a hard delete
+      // stays admin-only, as before.
+      allow delete: if isAdmin();
     }
+
     match /setlists/{setlistId} {
-      allow read: if request.auth != null && (resource == null || resource.data.ownerId == request.auth.uid || resource.data.isShared == true);
-      allow create: if request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
-      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow read: if request.auth != null
+        && (resource == null
+            || resource.data.ownerId == request.auth.uid
+            || resource.data.isShared == true);
+      allow create: if isEditor() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.ownerId == request.auth.uid;
     }
+
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }

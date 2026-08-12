@@ -44,7 +44,7 @@ graph TD
 ### 1. Web Front-end (`web/`)
 A pure, framework-less frontend built with standard HTML5, CSS3, and Vanilla JavaScript. 
 * **IndexedDB Store**: Manages custom user-added songs, setlists, and a `pre_restore` safety backup store.
-* **Static Fallback**: Reads default songs from [songs-data.js](file:///c:/dev/songbook/web/songs-data.js) (automatically updated by the build pipeline).
+* **Static Fallback**: Reads default songs from [songs-data.js](web/songs-data.js) (automatically updated by the build pipeline).
 
 ### 2. Standalone HTML (`outputs/songbook.html`)
 A single, highly portable, standalone application generated in the `outputs/` directory of the workspace. All JS libraries, stylesheets, and song databases are fully inlined.
@@ -56,7 +56,7 @@ A native Android project configured to wrap the web assets locally in a WebView.
 
 ## 📋 Dev Scripts & Pipeline
 
-All utility scripts are written in Python and located in the [scripts_and_tools/](file:///c:/dev/songbook/scripts) directory.
+All utility scripts are written in Python and located in the [scripts_and_tools/](scripts_and_tools/) directory.
 
 ### 1. Development & Sync Server
 Run the local dev server to host the web app and capture song edits made directly in the UI to save them back to your local disk:
@@ -103,7 +103,7 @@ Run the following script to bundle your files into a single HTML document:
 ```bash
 python scripts_and_tools/bundle_app.py
 ```
-The output file [songbook.html](file:///c:/Develop/Github/songbook/outputs/songbook.html) can be opened in any browser.
+The output file [songbook.html](outputs/songbook.html) can be opened in any browser.
 
 ### 2. Android APK Release Build
 1. Sync the latest web changes with the Android assets folder:
@@ -122,7 +122,18 @@ The output file [songbook.html](file:///c:/Develop/Github/songbook/outputs/songb
 
 ## 🆕 Release History & Changelog
 
-### Version 1.5.6  (Current)
+### Version 1.6.0  (Current)
+* **Consistent Chord Alignment Across Devices**: Chord-over-lyric positioning now matches between desktop and the Android app. Inter contains no Hebrew, so Hebrew lines used to fall through to whatever the platform called `sans-serif` (Arial on Windows, Noto/Roboto on Android) and the two lines of a pair were measured by different fonts. Rubik (Hebrew) and Arimo (Latin, metric-compatible with Arial) are now self-hosted from `fonts/` and pinned for both the rendered sheet and the editor textarea.
+* **Offline Icons**: Material Symbols is self-hosted as a 29-icon subset (29 KB instead of the full ~4 MB set), so the offline Android WebView renders glyphs instead of the icon names as plain text. Adding a new icon name anywhere in the app requires regenerating the subset — see the note above the `@font-face` rule in [styles.css](web/styles.css).
+* **Faster Rendering**: The parser no longer precomputes per-character pixel offsets through an Arial width table and a nearest-offset search for every line of every song. The renderer lays the chord row over the lyric row using the original whitespace plus `white-space: pre-wrap`, and the segment data it never read is gone.
+* **Chord-Line Detection Fixes**: A malformed character class (`[()[].,!?;:"' Israel]`) was silently stripping the letters of "Israel" from every token, letting plain lyric lines such as *"and the sky is grey"* be misread as chord lines. Performance instructions inside a chord line (`Bass: // Cm // x3`, `// D // x3 fast`) are now recognized instead of counting against it.
+* **Android Back Button**: From `targetSdk` 35 the predictive back gesture is on by default and the system stops calling `onBackPressed()`, so the old override had gone dead and Back exited the app instead of stepping through WebView history. Back navigation now goes through `onBackPressedDispatcher`. Backup rules (`backup_rules.xml`, `data_extraction_rules.xml`) are also wired into the manifest — they existed but were never referenced.
+* **Firestore Rules Hardened**: Song writes are now owner-scoped. The previous rule let any signed-in account overwrite or tombstone *any* song in the shared library; the admin retains full write access, which is what keeps the pre-existing ownerless songs editable.
+* **Slimmer APK & Safer Signing**: Dropped the unreachable Compose/Navigation/Material3 layer (`MainActivity` calls `setContentView(webView)` and never `setContent {}`), leaving four dependencies the app actually touches. Signing credentials now come from git-ignored `android/local.properties` or the environment rather than literals in the committed Gradle file.
+* **Single Font Request**: The Google Fonts request was being issued twice — once from `index.html` and once from an `@import` at the top of `styles.css`. The `@import` copy serialized two round trips before any text could paint and is gone.
+* **Mobile Display Fixes**: Further toolbar and layout overlap corrections on narrow screens.
+
+### Version 1.5.6
 * **Firebase Cloud Sync**: Migrated to a cloud-first architecture using Firebase Firestore. Songs and setlists are now securely synced across all devices in real-time.
 * **Google Authentication**: Added Google Sign-In support. Users can securely log in to access their cloud-saved songs.
 * **Public & Private Setlists**: Added the ability to toggle setlists between Public (shared) and Private (personal). Easily share setlists with band members via a public URL.

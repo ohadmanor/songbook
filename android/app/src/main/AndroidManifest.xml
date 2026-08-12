@@ -2,8 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- res/xml/backup_rules.xml and res/xml/data_extraction_rules.xml existed in
+         the project but were never referenced here, so both were dead files and
+         backup ran on the platform defaults. They are wired up now; editing those
+         files is what changes backup behaviour. -->
     <application
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"

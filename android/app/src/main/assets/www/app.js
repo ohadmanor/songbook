@@ -798,10 +798,13 @@ function bindEvents(db) {
         el.toolbarSearchDropdown.style.display = 'none';
       }
     } else {
+      // Every field is coerced: a song restored from a hand-made backup or a
+      // JSON import can be missing artist/key entirely, and one undefined field
+      // used to throw here and take the whole search box down with it.
       state.filteredSongs = state.songs.filter(song =>
-        song.title.toLowerCase().includes(cleanQuery) ||
-        song.artist.toLowerCase().includes(cleanQuery) ||
-        song.key.toLowerCase().includes(cleanQuery)
+        String(song.title || '').toLowerCase().includes(cleanQuery) ||
+        String(song.artist || '').toLowerCase().includes(cleanQuery) ||
+        String(song.key || '').toLowerCase().includes(cleanQuery)
       );
 
       // Update floating dropdown for toolbar search
@@ -917,7 +920,7 @@ function bindEvents(db) {
 
   // Font Controls
   el.fontDecBtn.addEventListener('click', () => {
-    if (state.fontSize > 0.7) {
+    if (state.fontSize > 0.4) {
       state.fontSize = parseFloat((state.fontSize - 0.1).toFixed(1));
       updateFontSizeUI();
     }
@@ -1291,9 +1294,7 @@ function bindEvents(db) {
         item.remarks = remarks;
 
         try {
-          if (db) {
-            await dbPutSetlist(db, setlist);
-          }
+          await dbPutSetlist(db, setlist);
           showToast("Setlist song updated.");
           closeSongModal();
           renderSetlistEditor();
@@ -1310,7 +1311,11 @@ function bindEvents(db) {
     const originalSong = state.songs.find(s => s.id === id);
     const filename = originalSong ? originalSong.filename : null;
 
-    const song = { id, title, artist, key, isRTL, rawText };
+    // Spread the existing record first so fields the editor does not surface
+    // survive the save. `bpm` is the one that bites: the metronome writes it
+    // onto the song, and rebuilding the object from the six form fields dropped
+    // it every time the song was edited.
+    const song = { ...(originalSong || {}), id, title, artist, key, isRTL, rawText };
     if (filename) song.filename = filename;
 
     if (state.currentUser && !state.currentUser.isAnonymous && typeof dbFirestore !== 'undefined' && dbFirestore) {
@@ -1399,7 +1404,7 @@ function bindEvents(db) {
         if (setlist && setlist.songs[state.activeSetlistSongIndex]) {
           setlist.songs.splice(state.activeSetlistSongIndex, 1);
           try {
-            if (db) await dbPutSetlist(db, setlist);
+            await dbPutSetlist(db, setlist);
             showToast("Song removed from setlist.");
             closeSongModal();
             renderSetlistEditor();
@@ -1914,7 +1919,6 @@ function bindEvents(db) {
       try {
         showToast("Restoring selected database changes...");
         if (dbFirestore && state.currentUser && !state.currentUser.isAnonymous) {
-          const batch = dbFirestore.batch();
           for (let i = 0; i < songsToRestore.length; i += 400) {
             const currentBatch = dbFirestore.batch();
             const chunk = songsToRestore.slice(i, i + 400);
@@ -2185,10 +2189,10 @@ function bindEvents(db) {
 
       try {
         if (state.currentUser && !state.currentUser.isAnonymous) {
-          if (db) await dbPutSetlist(db, newSetlist);
+          await dbPutSetlist(db, newSetlist);
           // Snapshot listener will populate state.setlists, preventing duplication
         } else {
-          if (db) await dbPutSetlist(db, newSetlist);
+          await dbPutSetlist(db, newSetlist);
           state.setlists.push(newSetlist);
         }
         state.activeSetlistId = newSetlist.id;
@@ -2243,16 +2247,19 @@ function bindEvents(db) {
         });
       }
 
-      // Weighted random sampling without replacement (A-Res algorithm)
-      available.sort((a, b) => {
-        const wA = (state.favorites && state.favorites.includes(a.id)) ? 4 : 1;
-        const wB = (state.favorites && state.favorites.includes(b.id)) ? 4 : 1;
-        const keyA = Math.pow(Math.random(), 1 / wA);
-        const keyB = Math.pow(Math.random(), 1 / wB);
-        return keyB - keyA; // descending order of keys
-      });
-
-      const selected = available.slice(0, count).map(s => ({ songId: s.id }));
+      // Weighted random sampling without replacement (A-Res algorithm).
+      // Each song gets ONE key, assigned before the sort. Generating the keys
+      // inside the comparator instead made it non-transitive -- the same pair
+      // could compare both ways -- which is undefined behaviour for sort() and
+      // threw away the favourites weighting it was supposed to apply.
+      const selected = available
+        .map(song => {
+          const weight = (state.favorites && state.favorites.includes(song.id)) ? 4 : 1;
+          return { song, sortKey: Math.pow(Math.random(), 1 / weight) };
+        })
+        .sort((a, b) => b.sortKey - a.sortKey) // descending order of keys
+        .slice(0, count)
+        .map(entry => ({ songId: entry.song.id }));
 
       const now = new Date();
       const dateStr = now.toLocaleDateString();
@@ -2265,9 +2272,9 @@ function bindEvents(db) {
 
       try {
         if (state.currentUser && !state.currentUser.isAnonymous) {
-          if (db) await dbPutSetlist(db, newSetlist);
+          await dbPutSetlist(db, newSetlist);
         } else {
-          if (db) await dbPutSetlist(db, newSetlist);
+          await dbPutSetlist(db, newSetlist);
           state.setlists.push(newSetlist);
         }
         state.activeSetlistId = newSetlist.id;
@@ -2303,9 +2310,7 @@ function bindEvents(db) {
       if (setlist) {
         setlist.name = newName;
         try {
-          if (db) {
-            await dbPutSetlist(db, setlist);
-          }
+          await dbPutSetlist(db, setlist);
           renderActiveSong(); // update gig header title
           renderToolbarSetlistSelect();
         } catch (err) {
@@ -2321,9 +2326,7 @@ function bindEvents(db) {
       if (setlist) {
         setlist.isShared = e.target.checked;
         try {
-          if (db) {
-            await dbPutSetlist(db, setlist);
-          }
+          await dbPutSetlist(db, setlist);
         } catch (err) {
           console.error(err);
         }
@@ -2338,9 +2341,7 @@ function bindEvents(db) {
 
       if (confirm(`Are you sure you want to delete the setlist "${setlist.name}" permanently?`)) {
         try {
-          if (db) {
-            await dbDeleteSetlist(db, setlist.id);
-          }
+          await dbDeleteSetlist(db, setlist.id);
           state.setlists = state.setlists.filter(s => s.id !== setlist.id);
           state.activeSetlistId = null;
           state.activeSetlistSongIndex = null;
@@ -2492,6 +2493,11 @@ function bindEvents(db) {
           const importAsNewSetlist = async (item) => {
             const newSetlist = JSON.parse(JSON.stringify(item));
             newSetlist.id = 'setlist_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+            // An exported setlist carries its original ownerId. Keeping it made
+            // the import land in the cloud owned by someone else, so the importer
+            // could not rename, reorder or delete their own copy. Dropping it lets
+            // dbPutSetlist stamp the current user as the owner.
+            delete newSetlist.ownerId;
 
             // Check for name collision
             let baseName = newSetlist.name;
@@ -2501,9 +2507,7 @@ function bindEvents(db) {
             }
 
             state.setlists.push(newSetlist);
-            if (db) {
-              await dbPutSetlist(db, newSetlist);
-            }
+            await dbPutSetlist(db, newSetlist);
             state.activeSetlistId = newSetlist.id;
             state.activeSetlistSongIndex = null;
             state.activeTab = 'setlists';
@@ -2518,9 +2522,7 @@ function bindEvents(db) {
               // Overwrite current setlist
               activeSetlist.name = setlistItem.name;
               activeSetlist.songs = setlistItem.songs;
-              if (db) {
-                await dbPutSetlist(db, activeSetlist);
-              }
+              await dbPutSetlist(db, activeSetlist);
               showToast(`Setlist "${activeSetlist.name}" overwritten.`);
               state.activeTab = 'setlists';
               renderToolbarSetlistSelect();
@@ -3336,17 +3338,6 @@ function toggleAutoScroll() {
   }
 }
 
-function getRowHeight() {
-  if (!el.songDisplayArea) return 32;
-  const sampleLine = el.songDisplayArea.querySelector('.chord-lyric-line, .chord-only-line, .lyric-only-line');
-  if (sampleLine) {
-    const height = sampleLine.offsetHeight;
-    if (height > 0) return height;
-  }
-  const baseSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-  return 1.8 * baseSize * state.fontSize;
-}
-
 function autoScrollStep(timestamp) {
   if (!state.isScrolling) return;
 
@@ -3700,8 +3691,10 @@ function openSongModal(song = null) {
     }
 
     el.editSongId.value = song.id;
-    el.formTitle.value = song.title;
-    el.formArtist.value = song.artist === 'Unknown Artist' ? '' : song.artist;
+    el.formTitle.value = song.title || '';
+    // An input assigned `undefined` renders the literal string "undefined",
+    // which then gets saved back as the artist name.
+    el.formArtist.value = (!song.artist || song.artist === 'Unknown Artist') ? '' : song.artist;
     el.formKey.value = song.key || '';
     el.formRtl.checked = song.isRTL;
     
@@ -3773,6 +3766,17 @@ function updateFormTextDirection() {
 // ==========================================
 // SETLIST FEATURE HELPER & RENDER FUNCTIONS
 // ==========================================
+
+// Resolves the display title of a setlist entry. An entry stores only
+// {songId, transposeOffset} until it is edited inside the setlist, at which
+// point it also carries its own title override -- so the override wins, and
+// otherwise we look the song up in the library by songId.
+function resolveSetlistItemTitle(item) {
+  if (!item) return '';
+  if (item.title !== undefined) return item.title;
+  const song = state.songs.find(s => s.id === item.songId);
+  return song ? song.title : '';
+}
 
 // Export single setlist to file
 function exportSetlistToFile(setlist) {
@@ -3939,7 +3943,7 @@ function renderSetlistsList() {
         e.stopPropagation(); // prevent opening the setlist editor
         setlist.isShared = !setlist.isShared;
         try {
-          if (db) await dbPutSetlist(db, setlist);
+          await dbPutSetlist(db, setlist);
           renderSetlistsList();
         } catch (err) {
           console.error(err);
@@ -3952,9 +3956,7 @@ function renderSetlistsList() {
       e.stopPropagation(); // prevent opening the setlist editor
       if (confirm(`Are you sure you want to delete the setlist "${setlist.name}" permanently?`)) {
         try {
-          if (db) {
-            await dbDeleteSetlist(db, setlist.id);
-          }
+          await dbDeleteSetlist(db, setlist.id);
           state.setlists = state.setlists.filter(s => s.id !== setlist.id);
           if (state.activeSetlistId === setlist.id) {
             state.activeSetlistId = null;
@@ -4094,7 +4096,7 @@ function renderSetlistEditor() {
           setlist.songs[index - 1] = temp;
 
           try {
-            if (db) await dbPutSetlist(db, setlist);
+            await dbPutSetlist(db, setlist);
           } catch (err) { console.error(err); }
 
           if (state.activeSetlistId === setlist.id) {
@@ -4121,7 +4123,7 @@ function renderSetlistEditor() {
           setlist.songs[index + 1] = temp;
 
           try {
-            if (db) await dbPutSetlist(db, setlist);
+            await dbPutSetlist(db, setlist);
           } catch (err) { console.error(err); }
 
           if (state.activeSetlistId === setlist.id) {
@@ -4145,7 +4147,7 @@ function renderSetlistEditor() {
         setlist.songs.splice(index, 1);
 
         try {
-          if (db) await dbPutSetlist(db, setlist);
+          await dbPutSetlist(db, setlist);
         } catch (err) { console.error(err); }
 
         if (state.activeSetlistId === setlist.id) {
@@ -4194,9 +4196,7 @@ async function saveSetlistTransposeOffset() {
     if (setlist && setlist.songs[state.activeSetlistSongIndex]) {
       setlist.songs[state.activeSetlistSongIndex].transposeOffset = state.transposeOffset;
       try {
-        if (db) {
-          await dbPutSetlist(db, setlist);
-        }
+        await dbPutSetlist(db, setlist);
         renderSetlistEditor();
       } catch (err) {
         console.error("Failed to save setlist transpose offset:", err);
@@ -4213,9 +4213,9 @@ function renderSetlistAddSongDropdown(query = '') {
   state.setlistSearchSongs = state.songs.filter(song => {
     if (!cleanQuery) return true;
     return (
-      song.title.toLowerCase().includes(cleanQuery) ||
-      song.artist.toLowerCase().includes(cleanQuery) ||
-      song.key.toLowerCase().includes(cleanQuery)
+      String(song.title || '').toLowerCase().includes(cleanQuery) ||
+      String(song.artist || '').toLowerCase().includes(cleanQuery) ||
+      String(song.key || '').toLowerCase().includes(cleanQuery)
     );
   });
 
@@ -4269,9 +4269,7 @@ async function addSongToActiveSetlist(songId) {
   setlist.songs.push({ songId, transposeOffset: 0 });
 
   try {
-    if (db) {
-      await dbPutSetlist(db, setlist);
-    }
+    await dbPutSetlist(db, setlist);
     if (el.setlistAddSongSearch) el.setlistAddSongSearch.value = '';
     if (el.setlistAddSongDropdown) el.setlistAddSongDropdown.style.display = 'none';
     state.setlistSearchIndex = -1;
@@ -4422,13 +4420,21 @@ function renderSetlistsDashboard() {
       iconName = 'album';
     }
 
-    // Dynamic description from song titles
+    // Dynamic description from song titles. A setlist entry is {songId,
+    // transposeOffset} and only carries a `title` once it has been edited
+    // inside the setlist, so the title has to be resolved from the library --
+    // reading item.title directly rendered every card as ", , ".
     let desc = 'Empty setlist. Add songs to get started.';
     if (setlist.songs && setlist.songs.length > 0) {
-      desc = setlist.songs.slice(0, 3).map(s => s.title).join(', ');
+      desc = setlist.songs
+        .slice(0, 3)
+        .map(item => resolveSetlistItemTitle(item))
+        .filter(Boolean)
+        .join(', ');
       if (setlist.songs.length > 3) {
         desc += ` and ${setlist.songs.length - 3} more`;
       }
+      if (!desc) desc = 'Songs in this setlist are no longer in your library.';
     }
 
     const privacyBadge = setlist.isShared 
@@ -4481,8 +4487,9 @@ function renderSetlistsDashboard() {
       // If the setlist has songs, open the first song, else stay on dashboard or open empty view
       if (setlist.songs && setlist.songs.length > 0) {
         const firstSong = setlist.songs[0];
-        // Find if this song exists in our library
-        const libSong = state.songs.find(s => s.id === firstSong.id || s.title === firstSong.title);
+        // Setlist entries reference the library by `songId`; matching on `.id`
+        // never hit and every card with songs reported "Song not found".
+        const libSong = state.songs.find(s => s.id === firstSong.songId);
         if (libSong) {
           state.currentSongId = libSong.id;
           state.activeSetlistSongIndex = 0;
@@ -4511,7 +4518,7 @@ function renderSetlistsDashboard() {
         e.stopPropagation();
         setlist.isShared = !setlist.isShared;
         try {
-          if (db) await dbPutSetlist(db, setlist);
+          await dbPutSetlist(db, setlist);
           renderSidebar();
           renderSetlistsDashboard();
         } catch (err) {
@@ -4534,9 +4541,7 @@ function renderSetlistsDashboard() {
         e.stopPropagation();
         if (confirm(`Are you sure you want to delete the setlist "${setlist.name}" permanently?`)) {
           try {
-            if (db) {
-              await dbDeleteSetlist(db, setlist.id);
-            }
+            await dbDeleteSetlist(db, setlist.id);
             state.setlists = state.setlists.filter(s => s.id !== setlist.id);
             if (state.activeSetlistId === setlist.id) {
               state.activeSetlistId = null;

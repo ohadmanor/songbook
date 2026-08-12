@@ -46,3 +46,7 @@ scripts/manual_edits.json
 outputs/
 *.keystore
 
+# Firebase CLI deploy cache. Regenerated on every `firebase deploy`, so tracking
+# it makes each deploy show up as a source change.
+.firebase/
+
