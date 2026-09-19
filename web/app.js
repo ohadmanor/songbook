@@ -3041,6 +3041,15 @@ async function renderPendingMusicXMLs() {
         osmd.rules.PageBottomMargin = 0.5;
         osmd.rules.PageLeftMargin = 0.5;
         osmd.rules.PageRightMargin = 0.5;
+
+        // Draw every bar, even a run of empty ones. By default OSMD collapses
+        // consecutive whole-bar rests into a single multi-measure rest symbol,
+        // and the bars it swallows get no graphical measure at all: no hit box,
+        // so the score editor cannot select them and the whole-bar rest inside
+        // them has no notehead to click either. That is invisible in a
+        // view-only score but it makes bars unreachable once they are editable.
+        osmd.rules.AutoGenerateMultipleRestMeasuresFromRestMeasures = false;
+        osmd.rules.RenderMultipleRestMeasures = false;
       }
       
       let loadData = item.data;
@@ -3992,8 +4001,10 @@ async function openMusicXMLEditor(idx) {
 
 function closeMusicXMLEditor(options = {}) {
   if (!musicxmlEditor) return;
-  if (!options.force && musicxmlEditor.xml !== musicxmlEditor.savedXml &&
-      !confirm("Discard unsaved changes to this score?")) {
+  // Text typed into the XML tab and not applied yet is an unsaved change too,
+  // even though the working copy has not moved.
+  const dirty = musicxmlEditor.xml !== musicxmlEditor.savedXml || musicxmlEditorPendingXml() !== null;
+  if (!options.force && dirty && !confirm("Discard unsaved changes to this score?")) {
     return;
   }
   clearTimeout(musicxmlEditor.previewTimer);
@@ -4014,6 +4025,13 @@ function closeMusicXMLEditor(options = {}) {
 // All three tabs read and write the one working XML, and they share the one
 // rendered score above them -- switching tabs never re-parses anything.
 function setMusicXMLEditorTab(tab, options = {}) {
+  // Leaving the XML tab promotes what was typed there into the working copy,
+  // the way the Chords & Lyrics inputs apply on blur. XML that does not parse
+  // stays in the textarea with its error showing rather than being dropped.
+  if (musicxmlEditor && musicxmlEditor.tab === 'xml' && tab !== 'xml' && !options.defer &&
+      musicxmlEditorPendingXml() !== null) {
+    applyMusicXMLEditorXml();
+  }
   ['notation', 'chords', 'xml'].forEach((name) => {
     const btn = musicxmlEditorEl(`tab-${name}`);
     const panel = musicxmlEditorEl(`${name}-panel`);
@@ -4034,7 +4052,9 @@ function setMusicXMLEditorTab(tab, options = {}) {
   }
   if (tab === 'xml') {
     const textarea = musicxmlEditorEl('xml-textarea');
-    if (textarea) textarea.value = musicxmlEditor.xml;
+    // Only re-seed it when nothing is pending: a draft the user could not
+    // apply (because it does not parse yet) must survive a trip to another tab.
+    if (textarea && musicxmlEditorPendingXml() === null) textarea.value = musicxmlEditor.xml;
   }
   if (tab === 'notation') {
     const panel = musicxmlEditorEl('notation-panel');
@@ -4043,6 +4063,17 @@ function setMusicXMLEditorTab(tab, options = {}) {
   }
   // The preview box changes size with the tab, so the overlay has to follow.
   refreshMusicXMLNotationOverlay();
+}
+
+// What is sitting in the XML tab's textarea but has not been applied to the
+// working copy yet, or null when the two agree. The textarea is the one editor
+// surface the user types into freely, so this is what makes Close prompt and
+// what Save applies before it writes.
+function musicxmlEditorPendingXml() {
+  if (!musicxmlEditor) return null;
+  const textarea = musicxmlEditorEl('xml-textarea');
+  if (!textarea) return null;
+  return textarea.value === musicxmlEditor.xml ? null : textarea.value;
 }
 
 // Rebuilds the Chords & Lyrics lists and the XML textarea from the working XML.
@@ -4184,15 +4215,15 @@ function applyMusicXMLEditorEdits() {
 
 // Apply XML: validate first; a broken document never replaces the working copy.
 function applyMusicXMLEditorXml() {
-  if (!musicxmlEditor) return;
+  if (!musicxmlEditor) return false;
   const textarea = musicxmlEditorEl('xml-textarea');
   const errorEl = musicxmlEditorEl('xml-error');
-  if (!textarea) return;
+  if (!textarea) return false;
 
   const result = window.MusicXMLTools.validate(textarea.value);
   if (!result.ok) {
     if (errorEl) errorEl.textContent = result.error || 'Invalid XML';
-    return;
+    return false;
   }
   if (errorEl) errorEl.textContent = '';
   if (textarea.value !== musicxmlEditor.xml) pushMusicXMLEditorHistory(musicxmlEditor.xml);
@@ -4201,6 +4232,7 @@ function applyMusicXMLEditorXml() {
   buildMusicXMLEditorLists();
   musicxmlEditor.listsStale = false;
   renderMusicXMLEditorPreview();
+  return true;
 }
 
 // Debounced: tabbing through inputs would otherwise re-parse the score on
@@ -4558,7 +4590,12 @@ function musicxmlNotationApply(nextXml, reselect, options = {}) {
 function afterMusicXMLWorkingXmlChanged(immediate) {
   if (!musicxmlEditor) return;
   const textarea = musicxmlEditorEl('xml-textarea');
-  if (textarea && document.activeElement !== textarea) textarea.value = musicxmlEditor.xml;
+  if (textarea && document.activeElement !== textarea) {
+    // An edit made elsewhere supersedes XML text that never parsed, so the two
+    // views cannot drift apart - but the user hears about it.
+    if (textarea.value !== musicxmlEditor.xml) showToast("The XML you typed was replaced by this edit.");
+    textarea.value = musicxmlEditor.xml;
+  }
   const errorEl = musicxmlEditorEl('xml-error');
   if (errorEl) errorEl.textContent = '';
   if (musicxmlEditor.tab === 'chords') {
@@ -4625,7 +4662,19 @@ function musicxmlNotationSetAccidental(alter) {
 }
 
 function musicxmlNotationToggleRest() {
-  return musicxmlNotationNoteOp((loc) => window.MusicXMLEdit.toggleRest(musicxmlEditor.xml, loc));
+  return musicxmlNotationNoteOp((loc, rec) => {
+    // A rest cannot live inside a chord, so say why rather than leave the user
+    // with the generic "that edit does not apply".
+    const next = rec.el.nextElementSibling;
+    const chorded = rec.isChordMember ||
+      (!!next && next.localName === 'note' &&
+       Array.from(next.children).some((c) => c.localName === 'chord'));
+    if (chorded) {
+      showToast("A chord note cannot become a rest. Delete it, or rest the whole chord.");
+      return null;
+    }
+    return window.MusicXMLEdit.toggleRest(musicxmlEditor.xml, loc);
+  });
 }
 
 function musicxmlNotationToggleTie() {
@@ -4786,14 +4835,12 @@ function musicxmlNotationShiftHarmony(delta) {
   return musicxmlNotationMoveHarmonyTo(window.MusicXMLEdit.locatorFromNoteRecord(target));
 }
 
-function musicxmlNotationNudgeHarmony(deltaDivisions) {
-  const sel = musicxmlEditor && musicxmlEditor.selection;
-  if (!sel || sel.kind !== 'harmony') { showToast("Select a chord symbol first."); return false; }
-  const applied = musicxmlNotationApply(
-    window.MusicXMLEdit.nudgeHarmony(musicxmlEditor.xml, sel.locator, deltaDivisions));
-  if (applied) showToast("Chord offset written. This score viewer does not show offsets.");
-  return applied;
-}
+// NOTE: there is no chord "nudge" control. MusicXMLEdit.nudgeHarmony writes a
+// correct <harmony><offset>, but OSMD 1.8.8's readChordSymbol only reads
+// <root>, <root-alter> and <kind>, so the symbol does not move by a pixel in
+// the editor preview or in the song view. Repositioning a chord is Move
+// left/right and dragging, both of which re-anchor the <harmony> to another
+// note and therefore really do move it.
 
 // The chord text in the input applies to the selected chord, or creates one on
 // the selected note.
@@ -4866,7 +4913,7 @@ function updateMusicXMLNotationControls() {
 
   panel.querySelectorAll('[data-mxn-dur], [data-mxn-acc]').forEach((b) => { b.disabled = !isNote; });
   const noteActs = ['pitch-up', 'pitch-down', 'octave-up', 'octave-down', 'dot', 'rest', 'tie', 'insert', 'delete'];
-  const chordActs = ['chord-left', 'chord-right', 'chord-nudge-back', 'chord-nudge-fwd', 'chord-remove'];
+  const chordActs = ['chord-left', 'chord-right', 'chord-remove'];
   panel.querySelectorAll('[data-mxn-act]').forEach((b) => {
     const act = b.dataset.mxnAct;
     if (noteActs.indexOf(act) >= 0) b.disabled = !isNote;
@@ -5030,8 +5077,6 @@ function onMusicXMLNotationToolbarClick(e) {
     case 'chord-add': musicxmlNotationStartAddChord(); break;
     case 'chord-left': musicxmlNotationShiftHarmony(-1); break;
     case 'chord-right': musicxmlNotationShiftHarmony(1); break;
-    case 'chord-nudge-back': musicxmlNotationNudgeHarmony(-1); break;
-    case 'chord-nudge-fwd': musicxmlNotationNudgeHarmony(1); break;
     case 'chord-remove': musicxmlNotationRemoveChord(); break;
     default: break;
   }
@@ -5039,9 +5084,25 @@ function onMusicXMLNotationToolbarClick(e) {
 
 function saveMusicXMLEditor() {
   if (!musicxmlEditor) return;
+  // Whatever is in the XML textarea is part of what the user is saving. Broken
+  // XML stops the save instead of being dropped behind a success toast.
+  if (musicxmlEditorPendingXml() !== null && !applyMusicXMLEditorXml()) {
+    setMusicXMLEditorTab('xml');
+    showToast("That XML does not parse, so the score was not saved.");
+    return;
+  }
   const fileInfo = state.editorMusicXMLs && state.editorMusicXMLs[musicxmlEditor.index];
   if (!fileInfo) {
     closeMusicXMLEditor({ force: true });
+    return;
+  }
+
+  // Nothing was edited. Re-encoding anyway would throw away the user's own
+  // bytes: a .mxl would come back as plain XML, five times the size, and the
+  // export button would hand back a different file from the one they attached.
+  if (musicxmlEditor.xml === musicxmlEditor.savedXml) {
+    closeMusicXMLEditor({ force: true });
+    showToast("No changes to this score.");
     return;
   }
 

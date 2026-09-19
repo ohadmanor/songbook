@@ -83,10 +83,14 @@ function isChordLine(line) {
  * @param {string} line 
  * @returns {boolean}
  */
+function isMusicXmlLine(line) {
+  return !!line && line.trim().startsWith('[MUSICXML:');
+}
+
 function isHeaderLine(line) {
   if (!line) return false;
   const trimmed = line.trim();
-  if (trimmed.startsWith('[IMAGE:')) return false;
+  if (isMusicXmlLine(trimmed)) return false;
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) return true;
   
   // Match Hebrew headers: בית, פזמון, מעבר, קורוס, מבוא, סיום (with or without numbers and colons)
@@ -148,11 +152,23 @@ function parseSongText(rawText) {
     
     if (trimmed.startsWith('[IMAGE:')) {
       commitParagraph();
-      const src = trimmed.substring(7, trimmed.length - 1).trim();
-      blocks.push({
-        type: 'image',
-        src: src
-      });
+      continue;
+    }
+    
+    if (isMusicXmlLine(trimmed)) {
+      commitParagraph();
+      // Match each token against its own closing bracket. Slicing a fixed 10
+      // chars off the front and one off the back assumed the token owned the
+      // whole line, so a second token on the same line -- or any trailing text --
+      // was folded into the first one's data URL and broke it.
+      const tokenRegex = /\[MUSICXML:\s*([^\]]*)\]/g;
+      let tokenMatch;
+      while ((tokenMatch = tokenRegex.exec(trimmed)) !== null) {
+        blocks.push({
+          type: 'musicxml',
+          data: tokenMatch[1].trim()
+        });
+      }
       continue;
     }
     
@@ -180,7 +196,8 @@ function parseSongText(rawText) {
       nextLine = nextLine.replace(/[\u200e\u200f\u200b\xa0]/g, ' ');
       const nextTrimmed = nextLine.trim();
       
-      if (nextTrimmed !== '' && !isHeaderLine(nextLine) && !isChordLine(nextLine)) {
+      if (nextTrimmed !== '' && !isHeaderLine(nextLine) && !isChordLine(nextLine) &&
+          !isMusicXmlLine(nextLine)) {
         // Aligned pair. Only the raw lines are kept: the renderer lays the chord
         // row over the lyric row using the original whitespace plus white-space:
         // pre-wrap, and never read the pixel-offset segments this used to compute

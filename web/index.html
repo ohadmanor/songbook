@@ -23,7 +23,7 @@
         <div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1;">
           <img src="favicon.png" alt="Logo" style="width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0;">
           <span class="logo">ChordBook</span>
-          <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700; background: var(--border-color); padding: 2px 6px; border-radius: 12px; border: 1px solid var(--border-color); line-height: 1;">v1.6.0</span>
+          <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700; background: var(--border-color); padding: 2px 6px; border-radius: 12px; border: 1px solid var(--border-color); line-height: 1;">v1.7.0</span>
         </div>
         <button class="btn mobile-menu-btn" id="hide-sidebar-btn">×</button>
       </div>
@@ -725,15 +725,7 @@
             <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-add">Add chord</button>
             <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-left">Move left</button>
             <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-right">Move right</button>
-            <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-nudge-back" title="Nudge the chord earlier">&#8722;</button>
-            <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-nudge-fwd" title="Nudge the chord later">+</button>
             <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-remove">Remove chord</button>
-          </div>
-        </div>
-        <div class="musicxml-notation-stage" id="musicxml-editor-notation-stage">
-          <div class="musicxml-notation-inner" id="musicxml-editor-notation-inner">
-            <div class="musicxml-notation-score" id="musicxml-editor-notation-score"></div>
-            <div class="musicxml-notation-overlay" id="musicxml-editor-notation-overlay"></div>
           </div>
         </div>
         <div class="musicxml-notation-status" id="musicxml-editor-notation-status">Click a note or a chord symbol to select it.</div>
@@ -824,10 +816,10 @@
   <script src="jszip.min.js"></script>
   <script src="transposer.js"></script>
   <script src="musicxml-tools.js?v=1"></script>
-  <script src="musicxml-edit.js?v=3"></script>
+  <script src="musicxml-edit.js?v=4"></script>
   <script src="chord-db.js"></script>
   <script src="songs-data.js"></script>
   <script src="parser.js?v=1"></script>
-  <script src="app.js?v=30"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>
