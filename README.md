@@ -2,6 +2,8 @@
 
 ChordBook is a modern, responsive, and offline-first digital songbook application. It displays lyric sheets with chords positioned exactly above the lyrics, supports interactive guitar/piano chord diagrams, and enables live-performance helpers like auto-scroll, a visual/audio metronome, wake-locks, and a distraction-free fullscreen mode.
 
+Songs can also carry engraved sheet music: a MusicXML score attached to a song is rendered inline under the lyrics, transposes together with the song, and can be edited note by note in a built-in score editor.
+
 It is distributed as both a **standalone portable HTML sheet** (for any browser or device) and a **native Android App** wrapper utilizing an offline WebView.
 
 ---
@@ -10,12 +12,19 @@ It is distributed as both a **standalone portable HTML sheet** (for any browser 
 
 * **Dynamic Transposition**: Instantly transpose chords up or down (+/- 11 semitones) and toggle between sharps (`#`) and flats (`b`) enharmonic representations.
 * **Interactive Chord Diagrams**: Hover or tap on any chord to display interactive SVG fingering diagrams for **Guitar** or **Piano** (powered by a custom chord database).
+* **Sheet Music (MusicXML)**: Attach a `.xml`, `.musicxml` or compressed `.mxl` score to any song. It is engraved inline in the song sheet by [OpenSheetMusicDisplay](https://opensheetmusicdisplay.org/), re-laid-out whenever the column changes width, and **transposed together with the song** — pressing `KEY +/-` moves the notes, the key signature and the chord symbols, while the stored attachment itself is left untouched. A download button on the score exports the file exactly as it was attached (original key, and the original `.mxl` bytes when it was compressed).
+* **Built-in Score Editor**: Press **Edit score** on an attachment in the song editor to open a three-tab editor above a live preview of the engraving:
+  * **Notation** — click a note, a chord symbol or a bar in the rendered score and edit it in place: pitch and octave, note value (whole down to 16th) and dots, accidentals (`#`, `b`, natural, or back to the key signature), rest/note, ties, insert and delete note, insert and delete bar, and the time signature. Chord symbols can be typed onto a note, moved to the neighbouring note with **Move left/right** or dragged onto another note, and removed. Everything is also reachable from the keyboard (arrows for pitch and selection, `1`–`5` for note values, `.`, `#`, `b`, `n`, `r`, `t`, `Enter`, `Delete`) with 50 steps of Undo/Redo (`Ctrl+Z` / `Ctrl+Shift+Z`).
+  * **Chords & Lyrics** — every chord symbol and every lyric syllable in the score as two bar-numbered lists, for quick text-only fixes. Clearing a field removes that chord or syllable; `Am7/G`-style slash chords are supported.
+  * **XML** — the raw MusicXML in a text box, validated before it replaces the working copy: a document that does not parse stays in the box with its error message instead of breaking the score. Saving with unparsable XML pending is refused rather than silently dropped.
 * **Metronome**: Built-in visual/audio metronome supporting multiple time signatures (`2/4`, `3/4`, `4/4`, `6/8`) and tap/BPM controls.
 * **Auto-Scroll**: Hands-free scrolling powered by a smooth sub-pixel rendering engine. Autoscrolling speed is adjustable via an exponential 10-level controller, designed to perfectly match any performance tempo from extremely slow to very fast. Features scroll-syncing that preserves autoscroll speed after manual adjustments.
 * **Built-in Visual Song Editor**: A markup-based song editor directly in the app. Includes:
-  * A formatting toolbar with visual SVG icons for toggling **Bold** (`**text**`), **Yellow Highlight** (`::text::`), and **Green Highlight** (`%%text%%`).
-  * Direct file selection or drag-and-drop to **import and embed images** directly into the song sheet. Imported images are compressed and resized on the fly using a canvas-based scaling algorithm.
-  * An option to toggle between full image display and a minimized placeholder/thumbnail view in the editor, ensuring high editing performance with zero input lag.
+  * A formatting toolbar with visual SVG icons for toggling **Bold** (`**text**`), **Yellow Highlight** (`==text==`), and **Green Highlight** (`%%text%%`).
+  * An **Import MusicXML** button that attaches a score file at the cursor as a short `[MUSICXML: n]` token. The score is stored inside the song's own text, so it travels with the song through cloud sync, database backups and setlist exports.
+  * A chip per attachment below the toolbar, with **Edit score**, **Export** and **Remove** actions (removing one renumbers the remaining tokens).
+  * A **Preview** toggle that renders the song exactly as a reader sees it, engraved scores included.
+  * Image embedding (`[IMAGE: ...]`) was removed in 1.7.0 — see the changelog below.
 * **Theme Customization**: Tailored, high-quality themes (Light, Dark, Sepia, and OLED Black) to ensure optimal legibility under any lighting conditions, with full rendering support for bold elements and colored highlights.
 * **Setlist Management**: Create custom setlists, reorder songs, adjust individual song transposition settings per setlist, and import/export setlists as JSON.
 * **Database Backup, Restore & Revert**:
@@ -42,15 +51,22 @@ graph TD
 ```
 
 ### 1. Web Front-end (`web/`)
-A pure, framework-less frontend built with standard HTML5, CSS3, and Vanilla JavaScript. 
+A pure, framework-less frontend built with standard HTML5, CSS3, and Vanilla JavaScript (classic scripts, no bundler and no modules).
 * **IndexedDB Store**: Manages custom user-added songs, setlists, and a `pre_restore` safety backup store.
 * **Static Fallback**: Reads default songs from [songs-data.js](web/songs-data.js) (automatically updated by the build pipeline).
+* **Song pipeline**: [parser.js](web/parser.js) turns raw song text into blocks (headers, chord/lyric pairs, `[MUSICXML: ...]` attachments) and [app.js](web/app.js) renders them.
+* **MusicXML layer**:
+  - [musicxml-tools.js](web/musicxml-tools.js) — pure helpers: decode/encode the `[MUSICXML: data:...]` payload (including unzipping `.mxl` through JSZip), transpose a whole score, validate XML, and read/write the chord symbols and lyrics. It decides by content rather than by MIME label and rejects anything that does not start like MusicXML, because OSMD treats a short non-XML string as a URL and would fetch it.
+  - [musicxml-edit.js](web/musicxml-edit.js) — the locator core that maps what OSMD drew on screen back to the exact `<note>` / `<harmony>` element, plus every edit operation (pitch, duration, accidental, rest, tie, insert/delete note, bar and time-signature edits, chord add/move/remove). Each operation takes XML in and returns new XML; the input document is never mutated.
+  - [OpenSheetMusicDisplay 1.8.8](https://opensheetmusicdisplay.org/) does the engraving. It is loaded from unpkg, so rendering a score needs network access on first load; everything else in the app is local.
+* **Renderer sanity page**: [web/test/index.html](web/test/index.html) loads a `.xml`/`.mxl` file straight into OSMD, with two sample scores beside it, for checking the renderer without the app around it.
 
 ### 2. Standalone HTML (`outputs/songbook.html`)
 A single, highly portable, standalone application generated in the `outputs/` directory of the workspace. All JS libraries, stylesheets, and song databases are fully inlined.
+> **Note:** [bundle_app.py](scripts_and_tools/bundle_app.py) does not inline `musicxml-tools.js` / `musicxml-edit.js` yet, so the standalone HTML carries relative `<script src>` tags for them and cannot render or edit scores on its own. Use the `web/` app or the Android build for MusicXML until the bundler covers them.
 
 ### 3. Android WebView Integration (`android/`)
-A native Android project configured to wrap the web assets locally in a WebView. Web assets are hosted in `android/app/src/main/assets/www` to run offline without any remote network requests.
+A native Android project configured to wrap the web assets locally in a WebView. Web assets are hosted in `android/app/src/main/assets/www` so the app works offline — apart from the Firebase SDKs, Google Fonts, and the OSMD script, which are still fetched over the network.
 
 ---
 
@@ -122,7 +138,16 @@ The output file [songbook.html](outputs/songbook.html) can be opened in any brow
 
 ## 🆕 Release History & Changelog
 
-### Version 1.6.0  (Current)
+### Version 1.7.0  (Current)
+* **MusicXML Scores in Songs**: Songs can now carry an engraved score. A `.xml`, `.musicxml` or `.mxl` file attached from the song editor is stored inside the song text as a `[MUSICXML: data:...]` token — so it syncs, backs up and exports with the song — and is drawn inline by OpenSheetMusicDisplay.
+* **Scores Follow the Song's Key**: `KEY +/-` transposes the engraving along with the chord sheet (notes, key signature and chord symbols, spelled by generic interval so a third stays a third). Decoded and transposed scores are memoized per attachment and offset, so stepping through keys does not re-parse a large file on every press. The stored attachment always keeps its original key, and the download button on a score hands back the original bytes — `.mxl` stays `.mxl`.
+* **Score Editor**: A three-tab editor (Notation / Chords & Lyrics / XML) over a live preview. All three tabs read and write one working copy, so switching between them never re-parses the score, and the XML tab keeps a draft that does not parse instead of discarding it. Saving an untouched score re-uses the original bytes rather than re-encoding it.
+* **Direct Notation Editing**: Notes, chord symbols and bars are selected by clicking the rendered SVG, with a hit-test index built from the MusicXML timing (`<duration>`, `<backup>`, `<forward>`, `<chord/>`) replayed over every part and measure. Edits cover pitch, octave, note value and dots, accidentals, rest/note, ties, note and bar insert/delete, time signature, and chord symbols (type, add, move by note, drag, remove), with 50 steps of undo/redo and full keyboard control.
+* **Rendering Fixes for Editability**: OSMD's page margins are trimmed to song-sheet padding, part names are suppressed, and multi-measure rest collapsing is switched off — collapsed bars get no graphical measure, so they could not be clicked or edited. OSMD instances are tracked in an app-level registry and driven by a `ResizeObserver`: its own `autoResize` registers a window listener it never removes, which left an immortal instance behind on every re-render.
+* **Attachment Parsing Hardened**: `[MUSICXML: ...]` tokens are matched against their own closing bracket, so a second token on the same line is no longer folded into the first one's data URL. Attachment text is validated before it reaches `osmd.load()`, which would otherwise treat a short crafted token as a URL and issue an outbound request from every reader's browser.
+* **Images Removed**: `[IMAGE: ...]` embedding is gone — the editor's image import, the on-the-fly compression and the thumbnail toggle with it. Legacy tokens are stripped when a song is opened for editing and ignored by the renderer, and the scans that were embedded in the database are archived under [songs_db/legacy_scans/](songs_db/legacy_scans/) with a `manifest.json` mapping each file to its song.
+
+### Version 1.6.0
 * **Consistent Chord Alignment Across Devices**: Chord-over-lyric positioning now matches between desktop and the Android app. Inter contains no Hebrew, so Hebrew lines used to fall through to whatever the platform called `sans-serif` (Arial on Windows, Noto/Roboto on Android) and the two lines of a pair were measured by different fonts. Rubik (Hebrew) and Arimo (Latin, metric-compatible with Arial) are now self-hosted from `fonts/` and pinned for both the rendered sheet and the editor textarea.
 * **Offline Icons**: Material Symbols is self-hosted as a 29-icon subset (29 KB instead of the full ~4 MB set), so the offline Android WebView renders glyphs instead of the icon names as plain text. Adding a new icon name anywhere in the app requires regenerating the subset — see the note above the `@font-face` rule in [styles.css](web/styles.css).
 * **Faster Rendering**: The parser no longer precomputes per-character pixel offsets through an Arial width table and a nearest-offset search for every line of every song. The renderer lays the chord row over the lyric row using the original whitespace plus `white-space: pre-wrap`, and the segment data it never read is gone.
