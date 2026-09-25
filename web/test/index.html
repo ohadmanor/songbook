@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MusicXML Test</title>
+  <script src="https://unpkg.com/opensheetmusicdisplay@1.8.8/build/opensheetmusicdisplay.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #osmd-container { border: 1px solid #ccc; min-height: 400px; margin-top: 20px; padding: 10px; }
+  </style>
+</head>
+<body>
+  <h1>MusicXML Renderer Test</h1>
+  <p>Select an .xml or .mxl file to test OpenSheetMusicDisplay:</p>
+  <input type="file" id="file-input" accept=".xml,.mxl,.musicxml" />
+  
+  <div id="osmd-container"></div>
+
+  <script>
+    const fileInput = document.getElementById('file-input');
+    const container = document.getElementById('osmd-container');
+    let osmd = null;
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (!osmd) {
+        osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(container, {
+          autoResize: true,
+          backend: "svg",
+          drawTitle: true,
+          drawSubtitle: true,
+          drawComposer: true,
+        });
+      }
+
+      container.innerHTML = 'Loading...';
+
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        const dataUrl = evt.target.result;
+        try {
+          let loadData = dataUrl;
+          if (typeof loadData === 'string' && loadData.startsWith("data:")) {
+            const res = await fetch(loadData);
+            if (file.name.toLowerCase().endsWith('.mxl') || file.type.includes('mxl') || file.type.includes('zip') || file.type.includes('octet-stream')) {
+                loadData = await res.arrayBuffer();
+            } else {
+                loadData = await res.text();
+            }
+          }
+          await osmd.load(loadData);
+          osmd.render();
+        } catch (error) {
+          console.error("Error rendering MusicXML", error);
+          container.innerHTML = '<div style="color:red">Error rendering MusicXML. See console.</div>';
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  </script>
+</body>
+</html>

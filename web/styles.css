@@ -147,7 +147,7 @@ opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=<comma,separated,na
   font-style: normal;
   font-weight: 100 700;
   font-display: block;
-  src: url('fonts/material-symbols-subset.woff2') format('woff2');
+  src: url('fonts/material-symbols-subset.woff2?v=3') format('woff2');
 }
 
 /* Base icon rule, previously supplied by the CDN stylesheet. The 'liga' feature
@@ -566,6 +566,66 @@ body {
   margin-bottom: 1.8rem;
 }
 
+/* Rendered MusicXML score (OpenSheetMusicDisplay).
+   OSMD draws the staff in black, so the container keeps a light ground of its own
+   rather than inheriting the page background - otherwise the score disappears
+   under the dark and oled themes. */
+.song-musicxml-container {
+  position: relative; /* anchors the export button */
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.35rem 0.4rem;
+  margin: 1rem 0 1.2rem;
+  overflow-x: auto;
+  min-height: 0; /* let a short score be short; OSMD sizes the svg itself */
+  direction: ltr; /* notation is always left-to-right, even in RTL songs */
+}
+
+.song-musicxml-container svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Per-score export button (song view). Room is made above the notation so it
+   never sits on the first staff. Fixed light colours: the container keeps a
+   white ground under every theme. */
+.song-musicxml-container.has-export {
+  padding-top: 2.4rem;
+}
+
+.musicxml-export-btn {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid #c3c6d7;
+  background-color: #ffffff;
+  color: #434655;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.8;
+  transition: all 0.2s;
+}
+
+.musicxml-export-btn:hover,
+.musicxml-export-btn:focus-visible {
+  opacity: 1;
+  color: #004ac6;
+  border-color: #004ac6;
+}
+
+.musicxml-export-btn .material-symbols-outlined {
+  font-size: 20px;
+}
+
 .chord-lyric-line {
   display: flex;
   flex-wrap: wrap;
@@ -928,51 +988,6 @@ strong .chord, .chord strong {
 
 .toast.active {
   transform: translateX(-50%) translateY(0);
-}
-
-/* Scan Note Image Styling */
-.song-image-container {
-  text-align: inherit; /* Matches text alignment (right-aligned in RTL, left-aligned in LTR) */
-  margin: 1.5rem 0;
-  width: 100%;
-}
-
-.song-image {
-  display: inline-block;
-  max-width: 100%;
-  height: auto;
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-  border: 1px solid var(--border-color);
-  transition: filter 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease, max-width 0.3s ease;
-  background-color: #ffffff; /* Preserves visual clarity if some regions are transparent */
-  cursor: zoom-out;
-}
-
-.song-image:hover {
-  transform: scale(1.01);
-  box-shadow: var(--shadow-lg);
-}
-
-.song-image.expanded {
-  max-width: 15%;
-  cursor: zoom-in;
-}
-
-@media (max-width: 768px) {
-  .song-image {
-    max-width: 100%;
-  }
-}
-
-/* Theme-Specific Filters for Scan Images */
-[data-theme="dark"] .song-image,
-[data-theme="oled"] .song-image {
-  filter: invert(0.9) hue-rotate(180deg) brightness(1.1) contrast(1.1);
-}
-
-[data-theme="sepia"] .song-image {
-  filter: sepia(0.85) brightness(0.92) contrast(1.1);
 }
 
 /* Floating Search Dropdown for Toolbar */
@@ -2211,6 +2226,438 @@ input:checked + .toggle-slider:before {
   background-color: var(--bg-secondary);
   color: var(--accent-color);
   border-color: var(--accent-color);
+}
+
+/* Edit / export controls on an attachment chip */
+.editor-media-chip-btn {
+  font-size: 18px;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.editor-media-chip-btn:hover,
+.editor-media-chip-btn:focus-visible {
+  color: var(--accent-color);
+  background-color: var(--accent-light);
+  outline: none;
+}
+
+/* MusicXML score editor modal */
+#musicxml-editor-modal {
+  z-index: 600; /* above the song editor and its floating actions */
+}
+
+#musicxml-editor-modal .modal-content {
+  max-width: 1100px;
+  width: 95%;
+  max-height: 95vh;
+  padding: 1rem 1.25rem;
+  overflow: hidden;
+}
+
+.musicxml-editor-header {
+  gap: 0.75rem;
+}
+
+.musicxml-editor-header h2 {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.musicxml-editor-header .btn {
+  flex: 0 0 auto;
+}
+
+#musicxml-editor-close-btn {
+  padding: 0.4rem;
+}
+
+.musicxml-editor-preview {
+  position: relative;
+  flex: 0 0 auto;
+  max-height: 38vh;
+  overflow-y: auto;
+}
+
+/* Notation tab: the score IS the workspace, so it takes the room the chord
+   and lyric lists would otherwise have had. */
+#musicxml-editor-modal.musicxml-notation-active .musicxml-editor-preview {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 200px;
+}
+
+#musicxml-editor-modal.musicxml-notation-active .musicxml-notation-panel {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.musicxml-editor-preview .song-musicxml-container {
+  margin: 0;
+  min-height: 120px;
+}
+
+.musicxml-editor-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.musicxml-editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.9rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.musicxml-editor-tab .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.musicxml-editor-tab.active {
+  color: var(--accent-color);
+  border-bottom-color: var(--accent-color);
+}
+
+.musicxml-editor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.musicxml-editor-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.musicxml-editor-column h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.musicxml-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.musicxml-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.musicxml-editor-measure {
+  flex: 0 0 3.2rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.musicxml-editor-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.musicxml-editor-syllables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.musicxml-editor-syllables .musicxml-editor-input {
+  flex: 0 1 6.5rem;
+}
+
+.musicxml-editor-empty {
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.musicxml-editor-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.musicxml-editor-panel-footer .btn {
+  flex: 0 0 auto;
+}
+
+.musicxml-editor-hint,
+.musicxml-editor-xml-error {
+  flex: 1;
+  min-width: 12rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.musicxml-editor-xml-error {
+  color: #dc2626;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre-wrap;
+}
+
+.musicxml-editor-xml-error:empty {
+  display: none;
+}
+
+.musicxml-editor-xml {
+  flex: 1;
+  min-height: 220px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre;
+  overflow: auto;
+  resize: vertical;
+  direction: ltr;
+  text-align: left;
+  tab-size: 2;
+}
+
+@media (max-width: 600px) {
+  #musicxml-editor-modal .modal-content {
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    padding: 0.75rem;
+  }
+
+  .musicxml-editor-preview {
+    max-height: 30vh;
+  }
+
+  .musicxml-editor-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ==========================================================================
+   NOTATION EDITING (score editor, Notation tab)
+   The selection and the bar warnings are overlay divs inside the score
+   container -- never marks in OSMD's SVG, which it wipes on every render.
+   The container keeps a white ground under every theme, so these colours are
+   fixed rather than themed: they have to read on white in light, dark, oled
+   and sepia alike.
+   ========================================================================== */
+
+.musicxml-notation-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.musicxml-notation-select {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #e11d48;
+  border-radius: 4px;
+  background-color: rgba(225, 29, 72, 0.14);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.85);
+}
+
+.musicxml-notation-select.is-harmony {
+  border-color: #1d4ed8;
+  background-color: rgba(29, 78, 216, 0.14);
+}
+
+.musicxml-notation-select.is-measure {
+  border-style: dashed;
+  border-color: #6d28d9;
+  background-color: rgba(109, 40, 217, 0.08);
+}
+
+.musicxml-notation-overlay.is-dragging .musicxml-notation-select {
+  opacity: 0.55;
+}
+
+.musicxml-notation-warn {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background-color: #b45309;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.musicxml-notation-panel {
+  gap: 0.5rem;
+}
+
+.musicxml-notation-panel:focus {
+  outline: none;
+}
+
+.musicxml-notation-toolbar,
+.musicxml-notation-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.musicxml-notation-rows {
+  flex-direction: column;
+}
+
+.musicxml-notation-group,
+.musicxml-notation-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.musicxml-notation-group {
+  padding: 0.15rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background-color: var(--bg-primary);
+}
+
+.musicxml-notation-row {
+  gap: 0.35rem;
+}
+
+/* Tap targets stay >= 32px square on a touch screen. */
+.musicxml-notation-btn {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background-color: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.musicxml-notation-row .musicxml-notation-btn {
+  border-color: var(--border-color);
+  background-color: var(--bg-primary);
+}
+
+.musicxml-notation-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.musicxml-notation-btn:hover:not(:disabled) {
+  background-color: var(--accent-light);
+  border-color: var(--accent-color);
+}
+
+.musicxml-notation-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.musicxml-notation-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.musicxml-notation-num {
+  width: 3.4rem;
+  min-width: 3.4rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.8rem;
+}
+
+.musicxml-notation-chord {
+  flex: 0 1 8rem;
+  min-width: 5rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.musicxml-notation-status {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  direction: ltr;
+  text-align: left;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+/* Notation never mirrors, whatever the song's direction. */
+#musicxml-editor-modal.musicxml-notation-active .musicxml-editor-preview,
+.musicxml-notation-panel {
+  direction: ltr;
+}
+
+@media (max-width: 600px) {
+  /* Below this the staff is unreadable, so the score scrolls sideways in its
+     own box rather than being squeezed. */
+  #musicxml-editor-modal.musicxml-notation-active .musicxml-editor-preview {
+    min-height: 150px;
+  }
+
+  .musicxml-editor-preview .song-musicxml-container {
+    min-width: 460px;
+  }
+
+  #musicxml-editor-modal.musicxml-notation-active .musicxml-editor-preview {
+    overflow: auto;
+  }
+
+  .musicxml-notation-chord {
+    flex: 1 1 6rem;
+  }
 }
 
 .editor-footer {

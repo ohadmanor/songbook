@@ -191,6 +191,9 @@ const el = {
   editorHighlightBtn: document.getElementById('editor-format-yellow-btn'),
   saveSongBtnText: document.getElementById('save-song-btn-text'),
   editorPreviewDisplay: document.getElementById('editor-preview-display'),
+  editorXmlInput: document.getElementById('editor-xml-input'),
+  editorImportXmlBtn: document.getElementById('editor-import-xml-btn'),
+  editorMediaPreviewContainer: document.getElementById('editor-media-preview-container'),
   exportDbBtn: document.getElementById('export-db-btn'),
   restoreBackupBtn: document.getElementById('restore-backup-btn'),
   restoreConfirmModal: document.getElementById('restore-confirm-modal'),
@@ -1082,29 +1085,7 @@ function bindEvents(db) {
         el.editorPreviewToggleBtn.title = 'Preview Mode';
       } else {
         // Switch to preview mode
-        const rawText = el.formText.value || '';
-        
-        // Build image replacement map for the editor temporary image store
-        const textWithFullImages = rawText.replace(/\[IMAGE:\s*(\d+)\]/g, (match, idxStr) => {
-          const idx = parseInt(idxStr, 10) - 1;
-          if (state.editorImages && state.editorImages[idx]) {
-            return `[IMAGE: ${state.editorImages[idx]}]`;
-          }
-          return match;
-        });
-
-        // Resolve images option
-        const rendered = buildSongBodyFromRawText(textWithFullImages, {
-          isRTL: el.formRtl ? el.formRtl.checked : false
-        });
-        
-        el.editorPreviewDisplay.innerHTML = '';
-        el.editorPreviewDisplay.appendChild(rendered);
-        
-        // Hide editor textarea, show preview container
-        el.formText.style.display = 'none';
-        el.editorPreviewDisplay.className = `editor-textarea-preview-display song-container ${el.formRtl && el.formRtl.checked ? 'rtl' : ''}`;
-        el.editorPreviewDisplay.style.display = 'block';
+        renderEditorPreview();
         const span = el.editorPreviewToggleBtn.querySelector('span');
         if (span) span.textContent = 'edit';
         el.editorPreviewToggleBtn.title = 'Edit Mode';
@@ -1213,53 +1194,29 @@ function bindEvents(db) {
 
 
   // Click on import button triggers file selection
-  if (el.editorImportImageBtn && el.editorImageInput) {
-    el.editorImportImageBtn.addEventListener('click', (e) => {
+  if (el.editorImportXmlBtn && el.editorXmlInput) {
+    el.editorImportXmlBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      el.editorImageInput.click();
+      el.editorXmlInput.click();
     });
 
     // Handle selected file
-    el.editorImageInput.addEventListener('change', (e) => {
+    el.editorXmlInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (!file) return;
 
       const reader = new FileReader();
       reader.onload = (evt) => {
-        const img = new Image();
-        img.onload = () => {
-          const maxW = 1024;
-          let w = img.width;
-          let h = img.height;
-          
-          if (w > maxW) {
-            h = Math.round((h * maxW) / w);
-            w = maxW;
-          }
-          
-          const canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
-          
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, w, h);
-          
-          // Compress to JPEG with 0.7 quality
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          insertImageToken(compressedDataUrl);
-          
-          // Clear input value so same file can be re-imported if needed
-          el.editorImageInput.value = '';
-        };
-        img.onerror = () => {
-          showToast("Failed to load image file.");
-          el.editorImageInput.value = '';
-        };
-        img.src = evt.target.result;
+        let dataUrl = evt.target.result;
+        if (file.name.toLowerCase().endsWith('.mxl')) {
+            dataUrl = dataUrl.replace(/^data:[^;]*;/, 'data:application/mxl;');
+        }
+        insertMusicXMLToken({ name: file.name, data: dataUrl });
+        el.editorXmlInput.value = '';
       };
       reader.onerror = () => {
-        showToast("Failed to read image file.");
-        el.editorImageInput.value = '';
+        showToast("Failed to read MusicXML file.");
+        el.editorXmlInput.value = '';
       };
       reader.readAsDataURL(file);
     });
@@ -1989,13 +1946,6 @@ function bindEvents(db) {
   // Touch event for mobile chord interaction (toggle display on tap)
   document.addEventListener('click', handleChordTooltipTap);
 
-  // Toggle image zoom expansion
-  document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('song-image')) {
-      e.target.classList.toggle('expanded');
-    }
-  });
-
   // Handle viewport resize (to close mobile nav)
   window.addEventListener('resize', () => {
     if (window.innerWidth > 768) {
@@ -2021,7 +1971,11 @@ function bindEvents(db) {
         updateFormTextDirection();
 
         if (el.importStatus) el.importStatus.textContent = "Imported successfully!";
-        showToast("Word document converted.");
+        if (result.skippedImageCount > 0) {
+          showToast(`Word document converted. ${result.skippedImageCount} image(s) skipped — import notation as MusicXML instead.`);
+        } else {
+          showToast("Word document converted.");
+        }
         
         // Reset file input so same file can be loaded again if needed
         e.target.value = '';
@@ -2546,6 +2500,8 @@ function bindEvents(db) {
       reader.readAsText(file);
     });
   }
+
+  bindMusicXMLEditorEvents();
 }
 
 /**
@@ -2559,6 +2515,10 @@ async function parseDocxFile(file) {
   const docXmlText = await zip.file("word/document.xml").async("text");
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(docXmlText, "text/xml");
+
+  // Pictures in the document are not imported: notation belongs in the sheet as
+  // MusicXML, which the user attaches separately. Count them so we can say so.
+  let skippedImageCount = 0;
 
   // 2. Read relationships file document.xml.rels if it exists
   const relsMap = {};
@@ -2594,13 +2554,11 @@ async function parseDocxFile(file) {
       }
     }
 
-    // Check for drawing/images (drawing)
+    // Count embedded pictures so the caller can report them; they are not imported.
     const drawings = pNode.getElementsByTagNameNS("*", "drawing");
-    const imagePlaceholders = [];
 
     for (let i = 0; i < drawings.length; i++) {
-      const drawing = drawings[i];
-      const blips = drawing.getElementsByTagNameNS("*", "blip");
+      const blips = drawings[i].getElementsByTagNameNS("*", "blip");
 
       for (let j = 0; j < blips.length; j++) {
         const blip = blips[j];
@@ -2620,38 +2578,12 @@ async function parseDocxFile(file) {
           }
         }
 
-        if (embedId && relsMap[embedId]) {
-          const mediaPath = relsMap[embedId];
-          const zipMediaPath = `word/${mediaPath}`;
-
-          const mediaFile = zip.file(zipMediaPath);
-          if (mediaFile) {
-            // Read as base64 data URL
-            const base64Bytes = await mediaFile.async("base64");
-            // Determine MIME type
-            let mimeType = "image/png";
-            if (mediaPath.toLowerCase().endsWith(".jpg") || mediaPath.toLowerCase().endsWith(".jpeg")) {
-              mimeType = "image/jpeg";
-            } else if (mediaPath.toLowerCase().endsWith(".gif")) {
-              mimeType = "image/gif";
-            } else if (mediaPath.toLowerCase().endsWith(".svg")) {
-              mimeType = "image/svg+xml";
-            }
-
-            const dataUrl = `data:${mimeType};base64,${base64Bytes}`;
-            imagePlaceholders.push(`[IMAGE: ${dataUrl}]`);
-          }
+        if (embedId && relsMap[embedId] && zip.file(`word/${relsMap[embedId]}`)) {
+          skippedImageCount++;
         }
       }
     }
 
-    if (imagePlaceholders.length > 0) {
-      if (text.trim()) {
-        return text + "\n" + imagePlaceholders.join("\n");
-      } else {
-        return imagePlaceholders.join("\n");
-      }
-    }
     return text;
   };
 
@@ -2713,7 +2645,7 @@ async function parseDocxFile(file) {
   // Detect Hebrew (RTL)
   const hasHebrew = /[\u0590-\u05FF]/.test(cleanLyrics) || /[\u0590-\u05FF]/.test(title);
 
-  return { title, text: cleanLyrics, isRTL: hasHebrew };
+  return { title, text: cleanLyrics, isRTL: hasHebrew, skippedImageCount };
 }
 
 // ==========================================
@@ -2981,11 +2913,214 @@ function formatChordLineHtml(html) {
     .replace(/%%([\s\S]*?)%%/g, '<mark class="song-highlight-green">$1</mark>');
 }
 
+// Live OSMD instances, one per on-screen score. OSMD's own autoResize option
+// registers a window listener it offers no way to remove, so before this every
+// re-render (transpose, font size, song switch, setlist next) left an immortal
+// instance behind that kept re-laying-out a container long since discarded.
+// We keep our own registry instead and drive resizes from a ResizeObserver.
+const activeMusicXMLRenders = [];
+
+function disposeDetachedMusicXMLRenders() {
+  for (let i = activeMusicXMLRenders.length - 1; i >= 0; i--) {
+    const entry = activeMusicXMLRenders[i];
+    if (entry.container.isConnected) continue;
+
+    clearTimeout(entry.timer);
+    try { entry.observer.disconnect(); } catch (e) { /* already gone */ }
+    try { entry.osmd.clear(); } catch (e) { /* already cleared */ }
+    activeMusicXMLRenders.splice(i, 1);
+  }
+}
+
+// Decoded (and transposed) scores memoized per attachment and offset: stepping
+// KEY +/- re-renders the song, and re-parsing a 400KB file on every press is
+// what made that sluggish. Insertion order is the eviction order.
+const transposedMusicXMLCache = new Map();
+const TRANSPOSED_MUSICXML_CACHE_MAX = 12;
+
+async function getRenderableMusicXML(dataUrl, semitones) {
+  const key = `${semitones}\u0000${dataUrl}`;
+  if (transposedMusicXMLCache.has(key)) return transposedMusicXMLCache.get(key);
+
+  // decodeAttachment decides by content rather than by MIME label (browsers
+  // label .musicxml and .mxl inconsistently), unpacks a compressed .mxl and
+  // rejects anything that does not start like MusicXML. Never hand unvalidated
+  // text to osmd.load(): OSMD treats any string under 2083 chars that does not
+  // start with <?xml as a URL and fetches it, so a crafted token in shared song
+  // text would make every reader's browser issue an outbound request.
+  let xml = (await window.MusicXMLTools.decodeAttachment(dataUrl)).xml;
+  if (semitones) xml = window.MusicXMLTools.transpose(xml, semitones);
+  if (!/^\s*<\?xml/.test(xml)) xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml;
+
+  if (transposedMusicXMLCache.size >= TRANSPOSED_MUSICXML_CACHE_MAX) {
+    transposedMusicXMLCache.delete(transposedMusicXMLCache.keys().next().value);
+  }
+  transposedMusicXMLCache.set(key, xml);
+  return xml;
+}
+
+// Export always hands back the stored original: original key, and the original
+// .mxl bytes when the attachment is compressed.
+async function exportMusicXMLAttachment(dataUrl, baseName) {
+  try {
+    const { bytes, wasCompressed } = await window.MusicXMLTools.decodeAttachment(dataUrl);
+    const name = String(baseName || '')
+      .replace(/\.(mxl|musicxml|xml)$/i, '')
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      .trim() || 'score';
+    const blob = new Blob([bytes], {
+      type: wasCompressed ? 'application/vnd.recordare.musicxml' : 'application/vnd.recordare.musicxml+xml'
+    });
+    downloadBlob(`${name}.${wasCompressed ? 'mxl' : 'musicxml'}`, blob);
+  } catch (e) {
+    console.error("MusicXML export failed:", e);
+    showToast("Could not export this MusicXML attachment.");
+  }
+}
+
+function buildMusicXMLExportButton(dataUrl, baseName) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'musicxml-export-btn';
+  btn.title = 'Export MusicXML';
+  const icon = document.createElement('span');
+  icon.className = 'material-symbols-outlined';
+  icon.textContent = 'download';
+  btn.appendChild(icon);
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    exportMusicXMLAttachment(dataUrl, baseName);
+  });
+  return btn;
+}
+
+async function renderPendingMusicXMLs() {
+  // Sweep first, and before the early return: switching to a song with no score
+  // at all still discards whatever the previous song had rendered.
+  disposeDetachedMusicXMLRenders();
+
+  if (!window.pendingMusicXMLRenders || window.pendingMusicXMLRenders.length === 0) return;
+  
+  const items = window.pendingMusicXMLRenders;
+  window.pendingMusicXMLRenders = [];
+
+  for (const item of items) {
+    try {
+      if (!window.opensheetmusicdisplay) {
+        console.error("OSMD library not loaded.");
+        continue;
+      }
+      
+      // OSMD wipes every child of the element it draws into on each render(),
+      // so it gets an inner canvas; the container's own children (the export
+      // button) live beside it.
+      const canvas = document.createElement('div');
+      canvas.className = 'song-musicxml-canvas';
+      item.container.appendChild(canvas);
+
+      const osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(canvas, {
+        autoResize: false, // see the ResizeObserver below
+        backend: "svg",
+        drawTitle: false,
+        drawSubtitle: false,
+        drawComposer: false,
+        drawLyricist: false,
+        drawPartNames: false,        // no "Melody" / "Instr. P1" label down the left
+        drawPartAbbreviations: false,
+        alignRests: 1
+      });
+
+      // Trim OSMD's page margins. These are page-layout padding around the
+      // engraving, not part of the notation itself, so shrinking them tightens
+      // the white box without changing the size of a single note. Defaults are
+      // 5 units (~50px) on each side, which is print-page framing we do not want
+      // inside a song sheet.
+      if (osmd.rules) {
+        osmd.rules.PageTopMargin = 0.5;
+        osmd.rules.PageBottomMargin = 0.5;
+        osmd.rules.PageLeftMargin = 0.5;
+        osmd.rules.PageRightMargin = 0.5;
+
+        // Draw every bar, even a run of empty ones. By default OSMD collapses
+        // consecutive whole-bar rests into a single multi-measure rest symbol,
+        // and the bars it swallows get no graphical measure at all: no hit box,
+        // so the score editor cannot select them and the whole-bar rest inside
+        // them has no notehead to click either. That is invisible in a
+        // view-only score but it makes bars unreachable once they are editable.
+        osmd.rules.AutoGenerateMultipleRestMeasuresFromRestMeasures = false;
+        osmd.rules.RenderMultipleRestMeasures = false;
+      }
+      
+      let loadData = item.data;
+      if (typeof loadData === 'string' && loadData.startsWith("data:")) {
+        // Shown in the song's current key; the stored attachment is untouched.
+        loadData = await getRenderableMusicXML(loadData, item.transpose || 0);
+      }
+
+      await osmd.load(loadData);
+      osmd.render();
+
+      if (item.exportName) {
+        item.container.classList.add('has-export');
+        item.container.appendChild(buildMusicXMLExportButton(item.data, item.exportName));
+      }
+
+      // Re-lay-out when the container itself changes width, from any cause --
+      // window resize, maximising the song column, the sidebar opening. OSMD's
+      // own autoResize only ever watched the window.
+      const entry = {
+        container: item.container,
+        osmd: osmd,
+        observer: null,
+        timer: 0,
+        lastWidth: item.container.clientWidth,
+        // Called after this instance draws, and again after every re-layout:
+        // the notation editor re-anchors its selection overlay on it.
+        onRendered: typeof item.onRendered === 'function' ? item.onRendered : null
+      };
+      entry.observer = new ResizeObserver(() => {
+        const width = entry.container.clientWidth;
+        // Width only: render() changes the height, which would otherwise make
+        // this observer retrigger itself forever.
+        if (!width || width === entry.lastWidth || !entry.container.isConnected) return;
+        entry.lastWidth = width;
+
+        clearTimeout(entry.timer);
+        entry.timer = setTimeout(() => {
+          try {
+            entry.osmd.render();
+            if (entry.onRendered) entry.onRendered(entry.osmd, entry.container);
+          } catch (err) {
+            console.error("MusicXML re-layout failed:", err);
+          }
+        }, 150);
+      });
+      entry.observer.observe(entry.container);
+      activeMusicXMLRenders.push(entry);
+
+      if (entry.onRendered) {
+        try {
+          entry.onRendered(osmd, item.container);
+        } catch (err) {
+          console.error("MusicXML render callback failed:", err);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to render MusicXML:", e);
+      item.container.innerHTML = '<div style="color:red; padding: 10px;">Failed to render MusicXML</div>';
+    }
+  }
+}
+
 function buildSongBodyFromRawText(rawText, options = {}) {
-  const resolveImageSrc = typeof options.resolveImageSrc === 'function'
-    ? options.resolveImageSrc
-    : (src) => src;
   const isRTL = !!options.isRTL;
+  // Semitones to shift attached scores by. The editor preview passes 0: it
+  // always shows the stored, original-key score.
+  const transpose = options.transpose || 0;
+  // Song title for the per-score export button; absent in the editor preview.
+  const exportTitle = options.exportTitle || null;
+  let scoreCount = 0;
 
   const blocks = window.SongParser.parseSongText(rawText || '');
   const body = document.createElement('div');
@@ -2997,17 +3132,21 @@ function buildSongBodyFromRawText(rawText, options = {}) {
       h.className = 'song-section-header';
       h.textContent = block.text;
       body.appendChild(h);
-    } else if (block.type === 'image') {
-      const imgDiv = document.createElement('div');
-      imgDiv.className = 'song-image-container';
+    } else if (block.type === 'musicxml') {
+      const xmlDiv = document.createElement('div');
+      xmlDiv.className = 'song-musicxml-container';
+      
+      body.appendChild(xmlDiv);
 
-      const img = document.createElement('img');
-      img.src = resolveImageSrc(block.src);
-      img.className = 'song-image';
-      img.alt = 'Scan Note';
-
-      imgDiv.appendChild(img);
-      body.appendChild(imgDiv);
+      if (!window.pendingMusicXMLRenders) {
+        window.pendingMusicXMLRenders = [];
+      }
+      window.pendingMusicXMLRenders.push({
+        container: xmlDiv,
+        data: block.data,
+        transpose: transpose,
+        exportName: exportTitle ? `${exportTitle} - score ${++scoreCount}` : null
+      });
     } else if (block.type === 'paragraph') {
       const p = document.createElement('div');
       p.className = 'song-paragraph';
@@ -3293,10 +3432,15 @@ function renderActiveSong() {
   container.appendChild(headerDiv);
 
   // Build parsed lyrics and chords
-  const body = buildSongBodyFromRawText(song.rawText, { isRTL: song.isRTL });
+  const body = buildSongBodyFromRawText(song.rawText, {
+    isRTL: song.isRTL,
+    transpose: state.transposeOffset,
+    exportTitle: song.title
+  });
 
   container.appendChild(body);
   el.songDisplayArea.appendChild(container);
+  renderPendingMusicXMLs();
 
   // Re-bind click handler on the newly rendered edit button
   const editBtn = document.getElementById('edit-active-btn');
@@ -3500,106 +3644,146 @@ function positionTooltip(targetEl) {
 }
 
 // Helper to update editor thumbnails preview
-function updateEditorImagePreviews() {
-  const container = document.getElementById('editor-image-preview-container');
+function updateEditorMediaPreviews() {
+  const container = document.getElementById('editor-media-preview-container');
   if (!container) return;
 
   container.innerHTML = '';
-  if (!state.editorImages || state.editorImages.length === 0) {
+  if (!state.editorMusicXMLs || state.editorMusicXMLs.length === 0) {
     container.style.display = 'none';
     return;
   }
 
   container.style.display = 'flex';
-  state.editorImages.forEach((src, idx) => {
+  state.editorMusicXMLs.forEach((fileInfo, idx) => {
     const wrapper = document.createElement('div');
     wrapper.style.position = 'relative';
-    wrapper.style.width = '60px';
-    wrapper.style.height = '60px';
+    wrapper.style.padding = '8px 12px';
     wrapper.style.border = '1px solid var(--border-color)';
     wrapper.style.borderRadius = '6px';
-    wrapper.style.overflow = 'hidden';
     wrapper.style.backgroundColor = 'var(--bg-primary)';
+    wrapper.style.display = 'flex';
+    wrapper.style.alignItems = 'center';
+    wrapper.style.gap = '8px';
 
-    const img = document.createElement('img');
-    img.src = src;
-    img.style.width = '100%';
-    img.style.height = '100%';
-    img.style.objectFit = 'cover';
-    img.title = `Image ${idx + 1}`;
-
-    // Index label
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = 'music_note';
+    
     const label = document.createElement('span');
-    label.textContent = idx + 1;
-    label.style.position = 'absolute';
-    label.style.bottom = '2px';
-    label.style.left = '2px';
-    label.style.backgroundColor = 'rgba(0, 0, 0, 0.65)';
-    label.style.color = '#fff';
-    label.style.fontSize = '0.65rem';
+    label.textContent = `${idx + 1}. ${fileInfo.name}`;
+    label.style.fontSize = '0.8rem';
     label.style.fontWeight = 'bold';
-    label.style.padding = '1px 4px';
-    label.style.borderRadius = '2px';
-    label.style.lineHeight = '1';
 
     // Remove button
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.innerHTML = '&times;';
     removeBtn.style.position = 'absolute';
-    removeBtn.style.top = '2px';
-    removeBtn.style.right = '2px';
-    removeBtn.style.width = '16px';
-    removeBtn.style.height = '16px';
+    removeBtn.style.top = '-6px';
+    removeBtn.style.right = '-6px';
+    removeBtn.style.width = '18px';
+    removeBtn.style.height = '18px';
     removeBtn.style.borderRadius = '50%';
     removeBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.9)';
     removeBtn.style.color = '#fff';
     removeBtn.style.border = 'none';
-    removeBtn.style.fontSize = '10px';
+    removeBtn.style.fontSize = '12px';
     removeBtn.style.display = 'flex';
     removeBtn.style.alignItems = 'center';
     removeBtn.style.justifyContent = 'center';
     removeBtn.style.cursor = 'pointer';
     removeBtn.style.padding = '0';
-    removeBtn.title = 'Remove Image';
+    removeBtn.title = 'Remove MusicXML';
 
     removeBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      state.editorImages.splice(idx, 1);
+      state.editorMusicXMLs.splice(idx, 1);
       
       // Remove placeholder from textarea
-      const placeholder = `[IMAGE: ${idx + 1}]`;
+      const placeholder = `[MUSICXML: ${idx + 1}]`;
       let text = el.formText.value;
       text = text.replace(placeholder, '');
       
-      // Shift subsequent placeholders: e.g. [IMAGE: 3] becomes [IMAGE: 2]
-      for (let i = idx + 2; i <= state.editorImages.length + 1; i++) {
-        const oldPlaceholder = `[IMAGE: ${i}]`;
-        const newPlaceholder = `[IMAGE: ${i - 1}]`;
+      // Shift subsequent placeholders: e.g. [MUSICXML: 3] becomes [MUSICXML: 2]
+      for (let i = idx + 2; i <= state.editorMusicXMLs.length + 1; i++) {
+        const oldPlaceholder = `[MUSICXML: ${i}]`;
+        const newPlaceholder = `[MUSICXML: ${i - 1}]`;
         text = text.replace(oldPlaceholder, newPlaceholder);
       }
 
       el.formText.value = text;
       el.formText.dispatchEvent(new Event('input', { bubbles: true }));
-      updateEditorImagePreviews();
+      updateEditorMediaPreviews();
     });
 
-    wrapper.appendChild(img);
+    // Edit / export controls (icon spans, like the editor top bar's)
+    const editBtn = createChipIconButton('edit', 'Edit score', () => openMusicXMLEditor(idx));
+    const exportBtn = createChipIconButton('download', 'Export MusicXML', () => exportMusicXMLAttachment(fileInfo.data, fileInfo.name));
+
+    wrapper.appendChild(icon);
     wrapper.appendChild(label);
+    wrapper.appendChild(editBtn);
+    wrapper.appendChild(exportBtn);
     wrapper.appendChild(removeBtn);
     container.appendChild(wrapper);
   });
 }
 
+function createChipIconButton(iconName, title, onClick) {
+  const span = document.createElement('span');
+  span.className = 'material-symbols-outlined editor-media-chip-btn';
+  span.setAttribute('role', 'button');
+  span.tabIndex = 0;
+  span.title = title;
+  span.textContent = iconName;
+  span.addEventListener('click', (e) => {
+    e.preventDefault();
+    onClick();
+  });
+  span.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick();
+    }
+  });
+  return span;
+}
+
+// Builds the editor's live preview from the textarea plus the temporary media
+// store. Also re-run after a score is edited in place, so a showing preview
+// reflects the new attachment.
+function renderEditorPreview() {
+  if (!el.editorPreviewDisplay || !el.formText) return;
+
+  // The editor always previews the stored score in its original key.
+  const rendered = buildSongBodyFromRawText(getRawTextFromEditor(), {
+    isRTL: el.formRtl ? el.formRtl.checked : false,
+    transpose: 0
+  });
+
+  el.editorPreviewDisplay.innerHTML = '';
+  el.editorPreviewDisplay.appendChild(rendered);
+
+  // Hide editor textarea, show preview container
+  el.formText.style.display = 'none';
+  el.editorPreviewDisplay.className = `editor-textarea-preview-display song-container ${el.formRtl && el.formRtl.checked ? 'rtl' : ''}`;
+  el.editorPreviewDisplay.style.display = 'block';
+
+  // Render only now: OSMD measures the container to lay the score out, so it
+  // must be visible first or it renders into a zero-width box.
+  renderPendingMusicXMLs();
+}
+
 // Helper to reconstruct rawText by replacing index placeholders with full sources
 function getRawTextFromEditor() {
   let text = el.formText.value;
-  if (state.editorImages && state.editorImages.length > 0) {
-    const placeholderRegex = /\[IMAGE:\s*(\d+)\]/g;
+  if (state.editorMusicXMLs && state.editorMusicXMLs.length > 0) {
+    const placeholderRegex = /\[MUSICXML:\s*(\d+)\]/g;
     text = text.replace(placeholderRegex, (fullMatch, numberStr) => {
       const idx = parseInt(numberStr, 10) - 1;
-      if (idx >= 0 && idx < state.editorImages.length) {
-        return `[IMAGE: ${state.editorImages[idx]}]`;
+      if (idx >= 0 && idx < state.editorMusicXMLs.length) {
+        return `[MUSICXML: ${state.editorMusicXMLs[idx].data}]`;
       }
       return fullMatch;
     });
@@ -3607,8 +3791,8 @@ function getRawTextFromEditor() {
   return text;
 }
 
-// Helper to insert image token at cursor position
-function insertImageToken(base64Data) {
+// Helper to insert MusicXML token at cursor position
+function insertMusicXMLToken(fileInfo) {
   const textarea = el.formText;
   if (!textarea) return;
 
@@ -3626,10 +3810,10 @@ function insertImageToken(base64Data) {
     suffix = '\n';
   }
   
-  state.editorImages.push(base64Data);
-  const imgIndex = state.editorImages.length;
+  state.editorMusicXMLs.push(fileInfo);
+  const mediaIndex = state.editorMusicXMLs.length;
   
-  const replacement = `${prefix}[IMAGE: ${imgIndex}]${suffix}`;
+  const replacement = `${prefix}[MUSICXML: ${mediaIndex}]${suffix}`;
   textarea.value = text.substring(0, start) + replacement + text.substring(end);
   
   // Trigger input event to update preview/dirty state
@@ -3640,7 +3824,7 @@ function insertImageToken(base64Data) {
   textarea.selectionEnd = start + replacement.length;
 
   // Update previews
-  updateEditorImagePreviews();
+  updateEditorMediaPreviews();
 }
 
 // Modal open/close actions
@@ -3673,8 +3857,8 @@ function openSongModal(song = null) {
     editorThemeToggleBtn.textContent = currentTheme === 'light' ? 'light_mode' : 'dark_mode';
   }
   
-  // Initialize/Reset temporary image store
-  state.editorImages = [];
+  // Initialize/Reset temporary media store
+  state.editorMusicXMLs = [];
 
   const isSetlistEdit = !!(state.activeSetlistId && state.activeSetlistSongIndex !== null);
   if (el.remarksGroup) {
@@ -3698,15 +3882,19 @@ function openSongModal(song = null) {
     el.formKey.value = song.key || '';
     el.formRtl.checked = song.isRTL;
     
-    // Parse rawText to extract full image sources and replace them with short placeholders
+    // Parse rawText to extract full MusicXML sources and replace them with short placeholders
     let rawText = song.rawText || '';
-    const imageRegex = /\[IMAGE:\s*([^\]]+)\]/g;
-    let imgCount = 0;
     
-    const cleanText = rawText.replace(imageRegex, (fullMatch, imgSource) => {
-      state.editorImages.push(imgSource.trim());
-      imgCount++;
-      return `[IMAGE: ${imgCount}]`;
+    // Strip old IMAGE tags so they don't break the layout or get interpreted as MusicXML
+    rawText = rawText.replace(/\[IMAGE:\s*([^\]]+)\]/gi, '');
+    
+    const mediaRegex = /\[MUSICXML:\s*([^\]]+)\]/gi;
+    let mediaCount = 0;
+    
+    const cleanText = rawText.replace(mediaRegex, (fullMatch, mediaSource) => {
+      state.editorMusicXMLs.push({ name: `MusicXML ${mediaCount + 1}`, data: mediaSource.trim() });
+      mediaCount++;
+      return `[MUSICXML: ${mediaCount}]`;
     });
     el.formText.value = cleanText;
 
@@ -3735,8 +3923,8 @@ function openSongModal(song = null) {
     if (el.importDocxGroup) el.importDocxGroup.style.display = 'block';
   }
 
-  // Render previews for loaded images (if any)
-  updateEditorImagePreviews();
+  // Render previews for loaded media (if any)
+  updateEditorMediaPreviews();
 
   updateFormTextDirection();
 
@@ -3755,6 +3943,1225 @@ function closeSongModal() {
     showView('song-viewport');
     renderActiveSong();
   }
+}
+
+// MusicXML score editor, opened from an attachment chip. It works on a copy of
+// the attachment's XML: nothing reaches state.editorMusicXMLs until "Save to
+// song", and the song itself is persisted by the Save Song button as before.
+// { index, name, xml, savedXml, editable, previewTimer, tab, selection,
+//   history, future, notation }
+let musicxmlEditor = null;
+
+// Undo depth. Snapshots are whole XML strings: a 400KB score at 50 deep is
+// ~20MB in the worst case, which is the price of an undo that cannot drift.
+const MUSICXML_HISTORY_MAX = 50;
+
+function musicxmlEditorEl(id) {
+  return document.getElementById(`musicxml-editor-${id}`);
+}
+
+async function openMusicXMLEditor(idx) {
+  const fileInfo = state.editorMusicXMLs && state.editorMusicXMLs[idx];
+  const modal = musicxmlEditorEl('modal');
+  if (!fileInfo || !modal || !window.MusicXMLTools) return;
+
+  let xml;
+  try {
+    xml = (await window.MusicXMLTools.decodeAttachment(fileInfo.data)).xml;
+  } catch (e) {
+    console.error("Could not open MusicXML attachment:", e);
+    showToast("This attachment is not readable MusicXML.");
+    return;
+  }
+
+  musicxmlEditor = {
+    index: idx, name: fileInfo.name, xml: xml, savedXml: xml,
+    editable: null, previewTimer: 0,
+    tab: 'notation',
+    selection: null,                 // { kind: 'note'|'harmony'|'measure', locator }
+    history: [], future: [],
+    notation: { osmd: null, container: null, index: null, indexXml: null,
+                report: null, reportXml: null, drag: null }
+  };
+  const title = musicxmlEditorEl('title');
+  if (title) title.textContent = fileInfo.name;
+  // Notation first: editing the notes is what the editor is for; the other two
+  // tabs read the same working XML, so nothing is lost by starting here.
+  setMusicXMLEditorTab('notation', { defer: true });
+  refreshMusicXMLEditorViews();
+  updateMusicXMLNotationControls();
+
+  // Visible before the score renders, or OSMD lays out into a zero-width box.
+  modal.classList.add('active');
+  renderMusicXMLEditorPreview(true);
+
+  const panel = musicxmlEditorEl('notation-panel');
+  if (panel) panel.focus();
+}
+
+function closeMusicXMLEditor(options = {}) {
+  if (!musicxmlEditor) return;
+  // Text typed into the XML tab and not applied yet is an unsaved change too,
+  // even though the working copy has not moved.
+  const dirty = musicxmlEditor.xml !== musicxmlEditor.savedXml || musicxmlEditorPendingXml() !== null;
+  if (!options.force && dirty && !confirm("Discard unsaved changes to this score?")) {
+    return;
+  }
+  clearTimeout(musicxmlEditor.previewTimer);
+  musicxmlEditor = null;
+
+  const modal = musicxmlEditorEl('modal');
+  if (modal) {
+    modal.classList.remove('active');
+    modal.classList.remove('musicxml-notation-active');
+  }
+
+  // Drop the preview's OSMD instance now rather than at the next song render.
+  const preview = musicxmlEditorEl('preview');
+  if (preview) preview.innerHTML = '';
+  disposeDetachedMusicXMLRenders();
+}
+
+// All three tabs read and write the one working XML, and they share the one
+// rendered score above them -- switching tabs never re-parses anything.
+function setMusicXMLEditorTab(tab, options = {}) {
+  // Leaving the XML tab promotes what was typed there into the working copy,
+  // the way the Chords & Lyrics inputs apply on blur. XML that does not parse
+  // stays in the textarea with its error showing rather than being dropped.
+  if (musicxmlEditor && musicxmlEditor.tab === 'xml' && tab !== 'xml' && !options.defer &&
+      musicxmlEditorPendingXml() !== null) {
+    applyMusicXMLEditorXml();
+  }
+  ['notation', 'chords', 'xml'].forEach((name) => {
+    const btn = musicxmlEditorEl(`tab-${name}`);
+    const panel = musicxmlEditorEl(`${name}-panel`);
+    if (btn) btn.classList.toggle('active', name === tab);
+    if (panel) panel.style.display = name === tab ? 'flex' : 'none';
+  });
+  // The score grows to fill the modal while notation is being edited.
+  const modal = musicxmlEditorEl('modal');
+  if (modal) modal.classList.toggle('musicxml-notation-active', tab === 'notation');
+
+  if (!musicxmlEditor) return;
+  musicxmlEditor.tab = tab;
+  if (options.defer) return;
+
+  if (tab === 'chords' && musicxmlEditor.listsStale) {
+    buildMusicXMLEditorLists();
+    musicxmlEditor.listsStale = false;
+  }
+  if (tab === 'xml') {
+    const textarea = musicxmlEditorEl('xml-textarea');
+    // Only re-seed it when nothing is pending: a draft the user could not
+    // apply (because it does not parse yet) must survive a trip to another tab.
+    if (textarea && musicxmlEditorPendingXml() === null) textarea.value = musicxmlEditor.xml;
+  }
+  if (tab === 'notation') {
+    const panel = musicxmlEditorEl('notation-panel');
+    if (panel) panel.focus();
+    updateMusicXMLNotationControls();
+  }
+  // The preview box changes size with the tab, so the overlay has to follow.
+  refreshMusicXMLNotationOverlay();
+}
+
+// What is sitting in the XML tab's textarea but has not been applied to the
+// working copy yet, or null when the two agree. The textarea is the one editor
+// surface the user types into freely, so this is what makes Close prompt and
+// what Save applies before it writes.
+function musicxmlEditorPendingXml() {
+  if (!musicxmlEditor) return null;
+  const textarea = musicxmlEditorEl('xml-textarea');
+  if (!textarea) return null;
+  return textarea.value === musicxmlEditor.xml ? null : textarea.value;
+}
+
+// Rebuilds the Chords & Lyrics lists and the XML textarea from the working XML.
+function refreshMusicXMLEditorViews() {
+  if (!musicxmlEditor) return;
+  const textarea = musicxmlEditorEl('xml-textarea');
+  if (textarea) textarea.value = musicxmlEditor.xml;
+  const errorEl = musicxmlEditorEl('xml-error');
+  if (errorEl) errorEl.textContent = '';
+  buildMusicXMLEditorLists();
+}
+
+function buildMusicXMLEditorLists() {
+  const chordList = musicxmlEditorEl('chord-list');
+  const lyricList = musicxmlEditorEl('lyric-list');
+  if (!musicxmlEditor || !chordList || !lyricList) return;
+  chordList.innerHTML = '';
+  lyricList.innerHTML = '';
+
+  let editable;
+  try {
+    editable = window.MusicXMLTools.extractEditable(musicxmlEditor.xml);
+  } catch (e) {
+    console.error("Could not read chords and lyrics:", e);
+    editable = { chords: [], lyrics: [] };
+  }
+  musicxmlEditor.editable = editable;
+
+  // Plain DOM throughout: the values come from the XML and never touch innerHTML.
+  const makeInput = (item, kind, index) => {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'form-control musicxml-editor-input';
+    input.value = item.text;
+    input.dataset.kind = kind;
+    input.dataset.index = String(index);
+    input.dataset.original = item.text;
+    input.spellcheck = false;
+    input.title = kind === 'chord' ? 'Chord symbol (empty removes it)' : 'Syllable (empty removes it)';
+    input.addEventListener('change', () => applyMusicXMLEditorEdits());
+    return input;
+  };
+  const makeMeasureLabel = (measure) => {
+    const label = document.createElement('span');
+    label.className = 'musicxml-editor-measure';
+    label.textContent = `m.${measure}`;
+    return label;
+  };
+  const makeEmptyNote = (text) => {
+    const note = document.createElement('div');
+    note.className = 'musicxml-editor-empty';
+    note.textContent = text;
+    return note;
+  };
+
+  if (editable.chords.length === 0) chordList.appendChild(makeEmptyNote('No chord symbols in this score.'));
+  editable.chords.forEach((chord, index) => {
+    const row = document.createElement('div');
+    row.className = 'musicxml-editor-row';
+    row.appendChild(makeMeasureLabel(chord.measure));
+    row.appendChild(makeInput(chord, 'chord', index));
+    chordList.appendChild(row);
+  });
+
+  // Lyrics: one input per syllable, grouped by measure
+  if (editable.lyrics.length === 0) lyricList.appendChild(makeEmptyNote('No lyrics in this score.'));
+  let group = null;
+  let groupKey = null;
+  editable.lyrics.forEach((lyric, index) => {
+    const key = `${lyric.part}|${lyric.measure}`;
+    if (!group || key !== groupKey) {
+      groupKey = key;
+      const row = document.createElement('div');
+      row.className = 'musicxml-editor-row';
+      row.appendChild(makeMeasureLabel(lyric.measure));
+      group = document.createElement('div');
+      group.className = 'musicxml-editor-syllables';
+      row.appendChild(group);
+      lyricList.appendChild(row);
+    }
+    group.appendChild(makeInput(lyric, 'lyric', index));
+  });
+}
+
+// Writes every changed input into the working XML and refreshes the preview.
+// Ids are document-order positions, so after a removal the lists are rebuilt;
+// otherwise the inputs are refreshed in place so focus and tab order survive.
+function applyMusicXMLEditorEdits() {
+  if (!musicxmlEditor || !musicxmlEditor.editable) return;
+  const panel = musicxmlEditorEl('chords-panel');
+  if (!panel) return;
+  const inputs = Array.from(panel.querySelectorAll('input[data-index]'));
+  const edits = { chords: [], lyrics: [] };
+  let removed = false;
+
+  inputs.forEach((input) => {
+    if (input.value === input.dataset.original) return;
+    const isChord = input.dataset.kind === 'chord';
+    const source = isChord ? musicxmlEditor.editable.chords : musicxmlEditor.editable.lyrics;
+    const item = source[parseInt(input.dataset.index, 10)];
+    if (!item) return;
+    const text = input.value.trim();
+    if (!text) removed = true;
+    (isChord ? edits.chords : edits.lyrics).push({ id: item.id, text });
+  });
+  if (edits.chords.length === 0 && edits.lyrics.length === 0) return;
+
+  const snapshot = musicxmlEditor.xml;
+  try {
+    musicxmlEditor.xml = window.MusicXMLTools.applyEdits(musicxmlEditor.xml, edits);
+  } catch (e) {
+    console.error("Applying score edits failed:", e);
+    showToast("Could not apply those edits.");
+    return;
+  }
+
+  // Chords & Lyrics edits share the notation tab's undo stack.
+  if (musicxmlEditor.xml !== snapshot) pushMusicXMLEditorHistory(snapshot);
+
+  const textarea = musicxmlEditorEl('xml-textarea');
+  if (textarea) textarea.value = musicxmlEditor.xml;
+
+  if (removed) {
+    buildMusicXMLEditorLists();
+  } else {
+    // Show what was actually written (e.g. a normalized chord spelling).
+    const editable = window.MusicXMLTools.extractEditable(musicxmlEditor.xml);
+    musicxmlEditor.editable = editable;
+    inputs.forEach((input) => {
+      const source = input.dataset.kind === 'chord' ? editable.chords : editable.lyrics;
+      const item = source[parseInt(input.dataset.index, 10)];
+      if (!item) return;
+      input.value = item.text;
+      input.dataset.original = item.text;
+    });
+  }
+  renderMusicXMLEditorPreview();
+}
+
+// Apply XML: validate first; a broken document never replaces the working copy.
+function applyMusicXMLEditorXml() {
+  if (!musicxmlEditor) return false;
+  const textarea = musicxmlEditorEl('xml-textarea');
+  const errorEl = musicxmlEditorEl('xml-error');
+  if (!textarea) return false;
+
+  const result = window.MusicXMLTools.validate(textarea.value);
+  if (!result.ok) {
+    if (errorEl) errorEl.textContent = result.error || 'Invalid XML';
+    return false;
+  }
+  if (errorEl) errorEl.textContent = '';
+  if (textarea.value !== musicxmlEditor.xml) pushMusicXMLEditorHistory(musicxmlEditor.xml);
+  musicxmlEditor.xml = textarea.value;
+  invalidateMusicXMLNotationCaches();
+  buildMusicXMLEditorLists();
+  musicxmlEditor.listsStale = false;
+  renderMusicXMLEditorPreview();
+  return true;
+}
+
+// Debounced: tabbing through inputs would otherwise re-parse the score on
+// every change. A fresh container each time: the old one leaves the DOM and
+// the render sweep disposes its OSMD instance, so re-renders never leak.
+function renderMusicXMLEditorPreview(immediate) {
+  if (!musicxmlEditor) return;
+  clearTimeout(musicxmlEditor.previewTimer);
+  const run = () => {
+    const host = musicxmlEditorEl('preview');
+    if (!musicxmlEditor || !host) return;
+    // The container is rebuilt every render, so both axes are carried over by
+    // hand: an edit must not jump the score back to bar 1.
+    const scrollTop = host.scrollTop;
+    const previous = musicxmlEditor.notation.container;
+    const scrollLeft = previous && previous.isConnected ? previous.scrollLeft : 0;
+    musicxmlEditor.notation.osmd = null;
+    host.innerHTML = '';
+    const container = document.createElement('div');
+    container.className = 'song-musicxml-container';
+    host.appendChild(container);
+
+    // A sibling of the canvas OSMD draws into, so a render never wipes it:
+    // the notation tab paints its selection and bar warnings here.
+    const overlay = document.createElement('div');
+    overlay.className = 'musicxml-notation-overlay';
+    overlay.id = 'musicxml-editor-notation-overlay';
+    container.appendChild(overlay);
+
+    // Raw XML rather than a data: URL. Re-encoding a large score to base64 was
+    // the slowest part of an arrow-key edit, and the transposed-XML cache is
+    // useless here because every edit is a new key. The prolog is guaranteed so
+    // OSMD can never mistake a short document for a URL to fetch.
+    let xml = musicxmlEditor.xml;
+    if (!/^\s*<\?xml/.test(xml)) xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml;
+
+    if (!window.pendingMusicXMLRenders) {
+      window.pendingMusicXMLRenders = [];
+    }
+    window.pendingMusicXMLRenders.push({
+      container: container,
+      data: xml,
+      transpose: 0,
+      onRendered: (osmd) => {
+        if (!musicxmlEditor) return;
+        musicxmlEditor.notation.osmd = osmd;
+        musicxmlEditor.notation.container = container;
+        host.scrollTop = scrollTop;
+        container.scrollLeft = scrollLeft;
+        refreshMusicXMLNotationOverlay();
+      }
+    });
+    renderPendingMusicXMLs();
+  };
+  if (immediate) {
+    run();
+  } else {
+    musicxmlEditor.previewTimer = setTimeout(run, 250);
+  }
+}
+
+// ==========================================
+// NOTATION EDITING
+//
+// The Notation tab edits the score directly: click a note or a chord symbol to
+// select it, then act on it from the keyboard or the toolbar. Every operation
+// goes through window.MusicXMLEdit, which is pure -- XML in, new XML out -- so
+// the working copy is replaced wholesale and the score is re-rendered. Nothing
+// mutates OSMD's SVG: the selection is an overlay div beside it, because OSMD
+// wipes its canvas on every render.
+// ==========================================
+
+function pushMusicXMLEditorHistory(xmlSnapshot, selectionSnapshot) {
+  if (!musicxmlEditor) return;
+  musicxmlEditor.history.push({
+    xml: xmlSnapshot === undefined ? musicxmlEditor.xml : xmlSnapshot,
+    selection: selectionSnapshot === undefined ? musicxmlEditor.selection : selectionSnapshot
+  });
+  if (musicxmlEditor.history.length > MUSICXML_HISTORY_MAX) musicxmlEditor.history.shift();
+  musicxmlEditor.future.length = 0;
+  updateMusicXMLNotationControls();
+}
+
+function invalidateMusicXMLNotationCaches() {
+  if (!musicxmlEditor) return;
+  musicxmlEditor.notation.index = null;
+  musicxmlEditor.notation.indexXml = null;
+  musicxmlEditor.notation.report = null;
+  musicxmlEditor.notation.reportXml = null;
+}
+
+// The score index is rebuilt only when the working XML actually changed: a
+// click, an overlay refresh and a status update would otherwise each re-walk
+// the whole document.
+function musicxmlNotationIndex() {
+  if (!musicxmlEditor || !window.MusicXMLEdit) return null;
+  const n = musicxmlEditor.notation;
+  if (n.index && n.indexXml === musicxmlEditor.xml) return n.index;
+  try {
+    n.index = window.MusicXMLEdit.buildScoreIndex(musicxmlEditor.xml);
+  } catch (e) {
+    console.error("Could not index the score:", e);
+    n.index = null;
+  }
+  n.indexXml = musicxmlEditor.xml;
+  return n.index;
+}
+
+function musicxmlNotationReport() {
+  if (!musicxmlEditor || !window.MusicXMLEdit) return [];
+  const n = musicxmlEditor.notation;
+  if (n.report && n.reportXml === musicxmlEditor.xml) return n.report;
+  try {
+    n.report = window.MusicXMLEdit.measureDurationReport(musicxmlEditor.xml);
+  } catch (e) {
+    n.report = [];
+  }
+  n.reportXml = musicxmlEditor.xml;
+  return n.report;
+}
+
+// Two locators point at the same thing. Onsets are compared with a tolerance
+// because they travel through OSMD as whole-note fractions.
+function musicxmlLocatorsMatch(a, b) {
+  if (!a || !b) return false;
+  const aKind = a.kind || 'note', bKind = b.kind || 'note';
+  if (aKind !== bKind) return false;
+  if (String(a.partId) !== String(b.partId)) return false;
+  if (Number(a.measureNumber) !== Number(b.measureNumber)) return false;
+  if (aKind === 'measure') return true;
+  if (aKind === 'harmony') {
+    if (a.harmonyIndex !== null && a.harmonyIndex !== undefined &&
+        b.harmonyIndex !== null && b.harmonyIndex !== undefined) {
+      return a.harmonyIndex === b.harmonyIndex;
+    }
+    return Math.abs((a.onsetWhole || 0) - (b.onsetWhole || 0)) < 1e-6;
+  }
+  if (Math.abs((a.onsetWhole || 0) - (b.onsetWhole || 0)) > 1e-6) return false;
+  if (String(a.voice || '1') !== String(b.voice || '1')) return false;
+  return (a.chordIndex || 0) === (b.chordIndex || 0) && (a.graceIndex || 0) === (b.graceIndex || 0);
+}
+
+// The drawn rect for the current selection. After an edit the exact note may be
+// gone (a delete, a bar re-cut), so within the same bar the nearest onset wins
+// and becomes the selection -- the cursor lands somewhere real instead of
+// disappearing.
+function musicxmlNotationSelectionRect() {
+  if (!musicxmlEditor || !musicxmlEditor.notation.osmd || !window.MusicXMLEdit) return null;
+  const sel = musicxmlEditor.selection;
+  if (!sel) return null;
+  const osmd = musicxmlEditor.notation.osmd;
+  const index = musicxmlNotationIndex();
+  const kind = sel.kind === 'harmony' ? 'harmony' : (sel.kind === 'measure' ? 'measure' : 'note');
+  let rects;
+  try {
+    rects = window.MusicXMLEdit.hitRects(osmd, kind, index);
+  } catch (e) {
+    return null;
+  }
+  let exact = null, near = null, bestGap = Infinity;
+  rects.forEach((r) => {
+    if (!r.locator) return;
+    if (!exact && musicxmlLocatorsMatch(sel.locator, r.locator)) { exact = r; return; }
+    if (kind !== 'note') return;
+    if (String(r.locator.partId) !== String(sel.locator.partId)) return;
+    if (Number(r.locator.measureNumber) !== Number(sel.locator.measureNumber)) return;
+    const gap = Math.abs((r.locator.onsetWhole || 0) - (sel.locator.onsetWhole || 0));
+    if (gap < bestGap) { bestGap = gap; near = r; }
+  });
+  if (exact) return exact;
+  if (near) {
+    musicxmlEditor.selection = { kind: 'note', locator: near.locator };
+    return near;
+  }
+  return null;
+}
+
+// Places an absolutely positioned box inside the score container. The container
+// is the horizontally scrolling element and is position: relative, so children
+// scroll with the notation instead of floating over it.
+function musicxmlNotationPlace(el, rect, container) {
+  const cr = container.getBoundingClientRect();
+  el.style.left = (rect.left - cr.left - container.clientLeft + container.scrollLeft) + 'px';
+  el.style.top = (rect.top - cr.top - container.clientTop + container.scrollTop) + 'px';
+  el.style.width = Math.max(4, rect.width) + 'px';
+  el.style.height = Math.max(4, rect.height) + 'px';
+}
+
+function refreshMusicXMLNotationOverlay() {
+  if (!musicxmlEditor) return;
+  const overlay = musicxmlEditorEl('notation-overlay');
+  const container = musicxmlEditor.notation.container;
+  if (!overlay || !container || !container.isConnected) return;
+  overlay.textContent = '';
+  const osmd = musicxmlEditor.notation.osmd;
+  if (!osmd || !window.MusicXMLEdit) { updateMusicXMLNotationStatus(); return; }
+
+  // A re-render moves everything: the cached hit rects are only valid until it.
+  try { window.MusicXMLEdit.invalidateHitCache(osmd); } catch (e) { /* not cached yet */ }
+  const index = musicxmlNotationIndex();
+
+  // Bars that no longer add up get a marker, whatever caused it.
+  const bad = new Set();
+  musicxmlNotationReport().forEach((row) => { if (!row.ok) bad.add(row.partId + '|' + row.measureNumber); });
+  if (bad.size) {
+    let measures = [];
+    try { measures = window.MusicXMLEdit.hitRects(osmd, 'measure', index); } catch (e) { measures = []; }
+    measures.forEach((m) => {
+      if (!m.locator || !bad.has(m.locator.partId + '|' + m.locator.measureNumber)) return;
+      const badge = document.createElement('div');
+      badge.className = 'musicxml-notation-warn';
+      badge.textContent = '!';
+      badge.title = `Bar ${m.locator.measureNumber} does not add up to its time signature`;
+      musicxmlNotationPlace(badge, { left: m.rect.left + 2, top: m.rect.top + 2, width: 16, height: 16 }, container);
+      overlay.appendChild(badge);
+    });
+  }
+
+  const hit = musicxmlNotationSelectionRect();
+  if (hit) {
+    const box = document.createElement('div');
+    const sel = musicxmlEditor.selection;
+    box.className = 'musicxml-notation-select' +
+      (sel.kind === 'harmony' ? ' is-harmony' : (sel.kind === 'measure' ? ' is-measure' : ''));
+    musicxmlNotationPlace(box, hit.rect, container);
+    overlay.appendChild(box);
+  }
+  updateMusicXMLNotationStatus();
+  updateMusicXMLNotationControls();
+}
+
+function musicxmlNotationScrollSelectionIntoView() {
+  const overlay = musicxmlEditorEl('notation-overlay');
+  const box = overlay && overlay.querySelector('.musicxml-notation-select');
+  if (box && box.scrollIntoView) box.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+const MUSICXML_ALTER_MARKS = { '-2': 'bb', '-1': 'b', '0': '', '1': '#', '2': '##' };
+
+function musicxmlNotePitchName(rec) {
+  if (!rec) return '';
+  if (rec.isRest) return 'rest';
+  if (!rec.step) return 'unpitched';
+  const mark = MUSICXML_ALTER_MARKS[String(Math.round(rec.alter || 0))] || '';
+  return rec.step + mark + (rec.octave === null || rec.octave === undefined ? '' : rec.octave);
+}
+
+function musicxmlNoteValueName(rec) {
+  if (!rec || !rec.type) return '';
+  const dots = rec.dots ? (rec.dots === 1 ? 'dotted ' : 'double-dotted ') : '';
+  return dots + rec.type;
+}
+
+function musicxmlHarmonyLabel(rec) {
+  if (!rec || !rec.el) return 'chord';
+  const kindEl = rec.el.querySelector('kind');
+  let suffix = '';
+  if (kindEl) {
+    const text = kindEl.getAttribute('text');
+    if (text !== null && text !== undefined) suffix = text;
+    else if (window.MusicXMLTools && window.MusicXMLTools.KIND_TO_SUFFIX) {
+      suffix = window.MusicXMLTools.KIND_TO_SUFFIX[(kindEl.textContent || '').trim()] || '';
+    }
+  }
+  let bass = '';
+  const bassStep = rec.el.querySelector('bass > bass-step');
+  if (bassStep) {
+    const alterEl = rec.el.querySelector('bass > bass-alter');
+    const alter = alterEl ? Math.round(parseFloat(alterEl.textContent) || 0) : 0;
+    bass = '/' + (bassStep.textContent || '').trim() + (MUSICXML_ALTER_MARKS[String(alter)] || '');
+  }
+  return ((rec.root || '') + suffix + bass) || 'chord';
+}
+
+function musicxmlNotationBeat(rec) {
+  if (!rec || !rec.divisions) return 1;
+  const beat = (rec.onset || 0) / rec.divisions + 1;
+  return Math.round(beat * 100) / 100;
+}
+
+function updateMusicXMLNotationStatus() {
+  const statusEl = musicxmlEditorEl('notation-status');
+  if (!statusEl || !musicxmlEditor) return;
+  const sel = musicxmlEditor.selection;
+  if (!sel) {
+    statusEl.textContent = 'Click a note or a chord symbol to select it.';
+    return;
+  }
+  const index = musicxmlNotationIndex();
+  if (!index) { statusEl.textContent = ''; return; }
+
+  if (sel.kind === 'harmony') {
+    const rec = window.MusicXMLEdit.resolveHarmonyLocator(index, sel.locator);
+    statusEl.textContent = rec
+      ? `bar ${rec.measureNumber} chord: ${musicxmlHarmonyLabel(rec)}`
+      : `bar ${sel.locator.measureNumber} chord (not in the score any more)`;
+    return;
+  }
+  if (sel.kind === 'measure') {
+    const m = window.MusicXMLEdit.findMeasure(index, sel.locator);
+    statusEl.textContent = m ? `bar ${m.number}` : '';
+    return;
+  }
+  const rec = window.MusicXMLEdit.resolveLocator(index, sel.locator);
+  if (!rec) { statusEl.textContent = `bar ${sel.locator.measureNumber} (no note there any more)`; return; }
+  const value = musicxmlNoteValueName(rec);
+  statusEl.textContent = `bar ${rec.measureNumber}, beat ${musicxmlNotationBeat(rec)}, ` +
+    musicxmlNotePitchName(rec) + (value ? ' ' + value : '');
+}
+
+function musicxmlNotationSelectedNoteLocator() {
+  const sel = musicxmlEditor && musicxmlEditor.selection;
+  return sel && sel.kind === 'note' ? sel.locator : null;
+}
+
+function musicxmlNotationSelectedNote() {
+  const loc = musicxmlNotationSelectedNoteLocator();
+  const index = loc ? musicxmlNotationIndex() : null;
+  return index ? window.MusicXMLEdit.resolveLocator(index, loc) : null;
+}
+
+function musicxmlNotationSelectedHarmony() {
+  const sel = musicxmlEditor && musicxmlEditor.selection;
+  if (!sel || sel.kind !== 'harmony') return null;
+  const index = musicxmlNotationIndex();
+  return index ? window.MusicXMLEdit.resolveHarmonyLocator(index, sel.locator) : null;
+}
+
+function musicxmlNotationSelectedMeasureNumber() {
+  const sel = musicxmlEditor && musicxmlEditor.selection;
+  return sel && sel.locator && sel.locator.measureNumber !== null &&
+         sel.locator.measureNumber !== undefined ? Number(sel.locator.measureNumber) : null;
+}
+
+// Every notation edit funnels through here: snapshot for undo, take the new XML
+// only when the operation actually changed something, optionally re-point the
+// selection, then re-render.
+function musicxmlNotationApply(nextXml, reselect, options = {}) {
+  if (!musicxmlEditor || typeof nextXml !== 'string') return false;
+  if (nextXml === musicxmlEditor.xml) {
+    if (!options.quiet) showToast("That edit does not apply to the selection.");
+    return false;
+  }
+  pushMusicXMLEditorHistory();
+  musicxmlEditor.xml = nextXml;
+  invalidateMusicXMLNotationCaches();
+  if (typeof reselect === 'function') {
+    try { reselect(musicxmlNotationIndex()); } catch (e) { console.error("Re-selecting after a score edit failed:", e); }
+  }
+  afterMusicXMLWorkingXmlChanged(options.immediate);
+  return true;
+}
+
+// The one place the working XML is published to the rest of the editor.
+function afterMusicXMLWorkingXmlChanged(immediate) {
+  if (!musicxmlEditor) return;
+  const textarea = musicxmlEditorEl('xml-textarea');
+  if (textarea && document.activeElement !== textarea) {
+    // An edit made elsewhere supersedes XML text that never parsed, so the two
+    // views cannot drift apart - but the user hears about it.
+    if (textarea.value !== musicxmlEditor.xml) showToast("The XML you typed was replaced by this edit.");
+    textarea.value = musicxmlEditor.xml;
+  }
+  const errorEl = musicxmlEditorEl('xml-error');
+  if (errorEl) errorEl.textContent = '';
+  if (musicxmlEditor.tab === 'chords') {
+    buildMusicXMLEditorLists();
+    musicxmlEditor.listsStale = false;
+  } else {
+    musicxmlEditor.listsStale = true;   // rebuilt when that tab is next shown
+  }
+  updateMusicXMLNotationControls();
+  renderMusicXMLEditorPreview(immediate);
+}
+
+function musicxmlEditorUndo() {
+  if (!musicxmlEditor || !musicxmlEditor.history.length) return;
+  const prev = musicxmlEditor.history.pop();
+  musicxmlEditor.future.push({ xml: musicxmlEditor.xml, selection: musicxmlEditor.selection });
+  musicxmlEditor.xml = prev.xml;
+  musicxmlEditor.selection = prev.selection;
+  invalidateMusicXMLNotationCaches();
+  afterMusicXMLWorkingXmlChanged();
+}
+
+function musicxmlEditorRedo() {
+  if (!musicxmlEditor || !musicxmlEditor.future.length) return;
+  const next = musicxmlEditor.future.pop();
+  musicxmlEditor.history.push({ xml: musicxmlEditor.xml, selection: musicxmlEditor.selection });
+  musicxmlEditor.xml = next.xml;
+  musicxmlEditor.selection = next.selection;
+  invalidateMusicXMLNotationCaches();
+  afterMusicXMLWorkingXmlChanged();
+}
+
+// ---------- note operations ----------
+
+function musicxmlNotationNoteOp(build) {
+  const loc = musicxmlNotationSelectedNoteLocator();
+  if (!loc) { showToast("Select a note first."); return false; }
+  const rec = musicxmlNotationSelectedNote();
+  if (!rec) { showToast("That note is no longer in the score."); return false; }
+  const next = build(loc, rec);
+  return next === null || next === undefined ? false : musicxmlNotationApply(next);
+}
+
+function musicxmlNotationNudgePitch(delta) {
+  return musicxmlNotationNoteOp((loc) => window.MusicXMLEdit.nudgePitch(musicxmlEditor.xml, loc, delta));
+}
+
+function musicxmlNotationNudgeOctave(delta) {
+  return musicxmlNotationNoteOp((loc) => window.MusicXMLEdit.nudgeOctave(musicxmlEditor.xml, loc, delta));
+}
+
+function musicxmlNotationSetDuration(type) {
+  return musicxmlNotationNoteOp((loc, rec) =>
+    window.MusicXMLEdit.setDuration(musicxmlEditor.xml, loc, { type: type, dots: rec.dots || 0 }));
+}
+
+function musicxmlNotationToggleDot() {
+  return musicxmlNotationNoteOp((loc, rec) =>
+    window.MusicXMLEdit.setDuration(musicxmlEditor.xml, loc, { type: rec.type || 'quarter', dots: rec.dots ? 0 : 1 }));
+}
+
+function musicxmlNotationSetAccidental(alter) {
+  return musicxmlNotationNoteOp((loc) => window.MusicXMLEdit.setAccidental(musicxmlEditor.xml, loc, alter));
+}
+
+function musicxmlNotationToggleRest() {
+  return musicxmlNotationNoteOp((loc, rec) => {
+    // A rest cannot live inside a chord, so say why rather than leave the user
+    // with the generic "that edit does not apply".
+    const next = rec.el.nextElementSibling;
+    const chorded = rec.isChordMember ||
+      (!!next && next.localName === 'note' &&
+       Array.from(next.children).some((c) => c.localName === 'chord'));
+    if (chorded) {
+      showToast("A chord note cannot become a rest. Delete it, or rest the whole chord.");
+      return null;
+    }
+    return window.MusicXMLEdit.toggleRest(musicxmlEditor.xml, loc);
+  });
+}
+
+function musicxmlNotationToggleTie() {
+  return musicxmlNotationNoteOp((loc, rec) => {
+    const tied = Array.from(rec.el.getElementsByTagName('tie'))
+      .some((t) => t.getAttribute('type') === 'start');
+    return window.MusicXMLEdit.setTie(musicxmlEditor.xml, loc, !tied);
+  });
+}
+
+function musicxmlNotationDeleteNote() {
+  return musicxmlNotationNoteOp((loc) => window.MusicXMLEdit.deleteNote(musicxmlEditor.xml, loc));
+}
+
+function musicxmlNotationInsertNote() {
+  return musicxmlNotationNoteOp((loc, rec) => window.MusicXMLEdit.insertNote(musicxmlEditor.xml, loc, {
+    where: 'after',
+    type: rec.type || 'quarter',
+    dots: rec.dots || 0,
+    isRest: !!rec.isRest,
+    step: rec.step || 'B',
+    alter: rec.alter || 0,
+    octave: rec.octave === null || rec.octave === undefined ? 4 : rec.octave
+  }));
+}
+
+// Left/right move along what is actually DRAWN, which is the order the eye
+// follows; notes inside a multi-measure rest have no glyph and are skipped.
+function musicxmlNotationStepSelection(delta) {
+  if (!musicxmlEditor || !musicxmlEditor.notation.osmd) return false;
+  const index = musicxmlNotationIndex();
+  let rects;
+  try {
+    rects = window.MusicXMLEdit.hitRects(musicxmlEditor.notation.osmd, 'note', index).filter((r) => r.locator);
+  } catch (e) {
+    return false;
+  }
+  if (!rects.length) return false;
+  const sel = musicxmlEditor.selection;
+  let at = -1;
+  if (sel && sel.kind === 'note') {
+    at = rects.findIndex((r) => musicxmlLocatorsMatch(sel.locator, r.locator));
+  }
+  const next = at < 0 ? (delta > 0 ? 0 : rects.length - 1)
+                      : Math.min(rects.length - 1, Math.max(0, at + delta));
+  musicxmlEditor.selection = { kind: 'note', locator: rects[next].locator };
+  refreshMusicXMLNotationOverlay();
+  musicxmlNotationScrollSelectionIntoView();
+  return true;
+}
+
+// ---------- bar operations ----------
+
+function musicxmlNotationTimeAt(index, measureRec) {
+  const part = index && index.parts[measureRec.partIndex];
+  if (!part) return { beats: 4, beatType: 4 };
+  for (let i = measureRec.index; i >= 0; i--) {
+    const t = part.measures[i].el.querySelector('attributes > time');
+    if (!t) continue;
+    const beats = t.querySelector('beats'), beatType = t.querySelector('beat-type');
+    if (beats && beatType) {
+      return { beats: parseInt(beats.textContent, 10) || 4, beatType: parseInt(beatType.textContent, 10) || 4 };
+    }
+  }
+  return { beats: 4, beatType: 4 };
+}
+
+function musicxmlNotationInsertBar(where) {
+  const number = musicxmlNotationSelectedMeasureNumber();
+  if (number === null) { showToast("Select a note or a bar first."); return false; }
+  const after = where === 'before' ? number - 1 : number;
+  const sel = musicxmlEditor.selection;
+  return musicxmlNotationApply(
+    window.MusicXMLEdit.insertMeasure(musicxmlEditor.xml, { afterMeasureNumber: after }),
+    () => {
+      if (where !== 'before' || !sel) return;
+      // Everything from the selected bar on moved up one number.
+      const loc = Object.assign({}, sel.locator, {
+        measureNumber: Number(sel.locator.measureNumber) + 1,
+        measureIndex: typeof sel.locator.measureIndex === 'number' ? sel.locator.measureIndex + 1 : sel.locator.measureIndex
+      });
+      musicxmlEditor.selection = { kind: sel.kind, locator: loc };
+    });
+}
+
+function musicxmlNotationDeleteBar() {
+  const number = musicxmlNotationSelectedMeasureNumber();
+  if (number === null) { showToast("Select a note or a bar first."); return false; }
+  return musicxmlNotationApply(
+    window.MusicXMLEdit.deleteMeasure(musicxmlEditor.xml, { measureNumber: number }),
+    () => { musicxmlEditor.selection = null; });
+}
+
+function musicxmlNotationApplyTimeSignature() {
+  const number = musicxmlNotationSelectedMeasureNumber();
+  if (number === null) { showToast("Select a note or a bar first."); return false; }
+  const beatsEl = musicxmlEditorEl('notation-beats');
+  const beatTypeEl = musicxmlEditorEl('notation-beat-type');
+  const beats = parseInt(beatsEl && beatsEl.value, 10);
+  const beatType = parseInt(beatTypeEl && beatTypeEl.value, 10);
+  if (!beats || !beatType) { showToast("Enter a time signature first."); return false; }
+  const applied = musicxmlNotationApply(
+    window.MusicXMLEdit.setTimeSignature(musicxmlEditor.xml, {
+      measureNumber: number, beats: beats, beatType: beatType
+    }));
+  // The op writes <time> but never re-cuts the bars, so say so rather than
+  // leaving the user to wonder about the warning markers that follow.
+  if (applied) showToast("Time signature set. Bars are not re-cut; check the flagged bars.");
+  return applied;
+}
+
+// ---------- chord symbol operations ----------
+
+function musicxmlNotationHeadNotes(index, partIndex) {
+  const part = index && index.parts[partIndex];
+  if (!part) return [];
+  return part.notes.filter((r) => !r.isChordMember && !r.isGrace);
+}
+
+// The <harmony> belongs to the note it precedes in document order.
+function musicxmlNotationHarmonyAnchorIndex(heads, harmonyEl) {
+  for (let i = 0; i < heads.length; i++) {
+    if (harmonyEl.compareDocumentPosition(heads[i].el) & Node.DOCUMENT_POSITION_FOLLOWING) return i;
+  }
+  return heads.length;
+}
+
+// After a move, the harmony is the last one written before the target note.
+function musicxmlNotationSelectHarmonyBefore(index, noteLocator) {
+  const note = window.MusicXMLEdit.resolveLocator(index, noteLocator);
+  if (!note) return;
+  const measure = index.parts[note.partIndex].measures[note.measureIndex];
+  let found = null;
+  measure.harmonies.forEach((h) => {
+    if (h.el.compareDocumentPosition(note.el) & Node.DOCUMENT_POSITION_FOLLOWING) found = h;
+  });
+  if (found) {
+    musicxmlEditor.selection = { kind: 'harmony', locator: window.MusicXMLEdit.locatorFromHarmonyRecord(found) };
+  }
+}
+
+function musicxmlNotationMoveHarmonyTo(noteLocator) {
+  const sel = musicxmlEditor && musicxmlEditor.selection;
+  if (!sel || sel.kind !== 'harmony' || !noteLocator) return false;
+  return musicxmlNotationApply(
+    window.MusicXMLEdit.moveHarmony(musicxmlEditor.xml, sel.locator, noteLocator),
+    (index) => musicxmlNotationSelectHarmonyBefore(index, noteLocator));
+}
+
+function musicxmlNotationShiftHarmony(delta) {
+  const rec = musicxmlNotationSelectedHarmony();
+  if (!rec) { showToast("Select a chord symbol first."); return false; }
+  const index = musicxmlNotationIndex();
+  const heads = musicxmlNotationHeadNotes(index, rec.partIndex);
+  const at = musicxmlNotationHarmonyAnchorIndex(heads, rec.el);
+  const target = heads[at + delta];
+  if (!target) { showToast(delta < 0 ? "Already on the first note." : "Already on the last note."); return false; }
+  return musicxmlNotationMoveHarmonyTo(window.MusicXMLEdit.locatorFromNoteRecord(target));
+}
+
+// NOTE: there is no chord "nudge" control. MusicXMLEdit.nudgeHarmony writes a
+// correct <harmony><offset>, but OSMD 1.8.8's readChordSymbol only reads
+// <root>, <root-alter> and <kind>, so the symbol does not move by a pixel in
+// the editor preview or in the song view. Repositioning a chord is Move
+// left/right and dragging, both of which re-anchor the <harmony> to another
+// note and therefore really do move it.
+
+// The chord text in the input applies to the selected chord, or creates one on
+// the selected note.
+function musicxmlNotationApplyChordText(forceAdd) {
+  const input = musicxmlEditorEl('notation-chord');
+  const text = input ? input.value.trim() : '';
+  const sel = musicxmlEditor && musicxmlEditor.selection;
+  if (!sel) { showToast("Select a note or a chord symbol first."); return false; }
+
+  if (sel.kind === 'harmony' && !forceAdd) {
+    if (!text) return musicxmlNotationApply(window.MusicXMLEdit.removeHarmony(musicxmlEditor.xml, sel.locator),
+                                            () => { musicxmlEditor.selection = null; });
+    return musicxmlNotationApply(window.MusicXMLEdit.setHarmonyText(musicxmlEditor.xml, sel.locator, text));
+  }
+  const noteLocator = sel.kind === 'note' ? sel.locator : null;
+  if (!noteLocator) { showToast("Select a note to hang the chord on."); return false; }
+  if (!text) { showToast("Type a chord symbol first."); return false; }
+  return musicxmlNotationApply(
+    window.MusicXMLEdit.addHarmony(musicxmlEditor.xml, noteLocator, text),
+    (index) => musicxmlNotationSelectHarmonyBefore(index, noteLocator));
+}
+
+function musicxmlNotationRemoveChord() {
+  const sel = musicxmlEditor && musicxmlEditor.selection;
+  if (!sel || sel.kind !== 'harmony') { showToast("Select a chord symbol first."); return false; }
+  return musicxmlNotationApply(window.MusicXMLEdit.removeHarmony(musicxmlEditor.xml, sel.locator),
+                               () => { musicxmlEditor.selection = null; });
+}
+
+// The chord before the selected note, used to pre-fill "Add chord".
+function musicxmlNotationPreviousChordText(index, noteRec) {
+  const part = index && index.parts[noteRec.partIndex];
+  if (!part) return '';
+  let best = null;
+  part.harmonies.forEach((h) => {
+    if (h.el.compareDocumentPosition(noteRec.el) & Node.DOCUMENT_POSITION_FOLLOWING) best = h;
+  });
+  return best ? musicxmlHarmonyLabel(best) : '';
+}
+
+function musicxmlNotationStartAddChord() {
+  const rec = musicxmlNotationSelectedNote();
+  const input = musicxmlEditorEl('notation-chord');
+  if (!rec) {
+    if (musicxmlEditor && musicxmlEditor.selection && musicxmlEditor.selection.kind === 'harmony') {
+      if (input) input.focus();
+      return false;
+    }
+    showToast("Select a note first.");
+    return false;
+  }
+  if (input) {
+    input.value = musicxmlNotationPreviousChordText(musicxmlNotationIndex(), rec);
+    input.focus();
+    input.select();
+  }
+  return true;
+}
+
+// ---------- controls ----------
+
+function updateMusicXMLNotationControls() {
+  if (!musicxmlEditor) return;
+  const panel = musicxmlEditorEl('notation-panel');
+  if (!panel) return;
+  const sel = musicxmlEditor.selection;
+  const isNote = !!sel && sel.kind === 'note';
+  const isHarmony = !!sel && sel.kind === 'harmony';
+  const hasBar = musicxmlNotationSelectedMeasureNumber() !== null;
+
+  panel.querySelectorAll('[data-mxn-dur], [data-mxn-acc]').forEach((b) => { b.disabled = !isNote; });
+  const noteActs = ['pitch-up', 'pitch-down', 'octave-up', 'octave-down', 'dot', 'rest', 'tie', 'insert', 'delete'];
+  const chordActs = ['chord-left', 'chord-right', 'chord-remove'];
+  panel.querySelectorAll('[data-mxn-act]').forEach((b) => {
+    const act = b.dataset.mxnAct;
+    if (noteActs.indexOf(act) >= 0) b.disabled = !isNote;
+    else if (chordActs.indexOf(act) >= 0) b.disabled = !isHarmony;
+    else if (act === 'chord-apply') b.disabled = !isNote && !isHarmony;
+    else if (act === 'chord-add') b.disabled = !isNote;
+    else if (act.indexOf('bar-') === 0 || act === 'time-apply') b.disabled = !hasBar;
+    else if (act === 'undo') b.disabled = musicxmlEditor.history.length === 0;
+    else if (act === 'redo') b.disabled = musicxmlEditor.future.length === 0;
+  });
+
+  const chordInput = musicxmlEditorEl('notation-chord');
+  if (chordInput && document.activeElement !== chordInput) {
+    const rec = isHarmony ? musicxmlNotationSelectedHarmony() : null;
+    chordInput.value = rec ? musicxmlHarmonyLabel(rec) : '';
+  }
+
+  const beatsEl = musicxmlEditorEl('notation-beats');
+  const beatTypeEl = musicxmlEditorEl('notation-beat-type');
+  if (beatsEl && beatTypeEl && document.activeElement !== beatsEl && document.activeElement !== beatTypeEl) {
+    const index = hasBar ? musicxmlNotationIndex() : null;
+    const measure = index ? window.MusicXMLEdit.findMeasure(index, sel.locator) : null;
+    const time = measure ? musicxmlNotationTimeAt(index, measure) : null;
+    beatsEl.value = time ? time.beats : '';
+    beatTypeEl.value = time ? time.beatType : '';
+  }
+}
+
+// ---------- pointer + keyboard ----------
+
+function onMusicXMLNotationPointerDown(e) {
+  if (!musicxmlEditor || musicxmlEditor.tab !== 'notation') return;
+  if (!musicxmlEditor.notation.osmd || !window.MusicXMLEdit) return;
+  if (e.button !== undefined && e.button !== 0) return;
+
+  // The browser moves focus to <body> as the default action of this very
+  // event, so the panel is focused after that has happened.
+  const panel = musicxmlEditorEl('notation-panel');
+  if (panel) setTimeout(() => {
+    if (musicxmlEditor && musicxmlEditor.tab === 'notation') panel.focus();
+  }, 0);
+
+  const index = musicxmlNotationIndex();
+  let hit = null;
+  try {
+    hit = window.MusicXMLEdit.hitTest(musicxmlEditor.notation.osmd, e.clientX, e.clientY,
+                                      { index: index, kinds: ['note', 'harmony', 'measure'] });
+  } catch (err) {
+    return;
+  }
+  if (!hit || !hit.locator) return;
+  musicxmlEditor.selection = { kind: hit.kind, locator: hit.locator };
+  refreshMusicXMLNotationOverlay();
+  if (hit.kind === 'harmony') startMusicXMLHarmonyDrag(e);
+}
+
+// Dragging a chord symbol sideways re-attaches it to whatever note it is
+// dropped on. The Move left/right buttons do the same thing accessibly.
+function startMusicXMLHarmonyDrag(e) {
+  const startX = e.clientX, startY = e.clientY;
+  let moved = false;
+  const overlay = musicxmlEditorEl('notation-overlay');
+
+  const onMove = (ev) => {
+    if (moved || Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 6) return;
+    moved = true;
+    if (overlay) overlay.classList.add('is-dragging');
+  };
+  const onUp = (ev) => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    if (overlay) overlay.classList.remove('is-dragging');
+    if (!moved || !musicxmlEditor || !musicxmlEditor.notation.osmd) return;
+    let target = null;
+    try {
+      target = window.MusicXMLEdit.hitTest(musicxmlEditor.notation.osmd, ev.clientX, ev.clientY,
+                                           { index: musicxmlNotationIndex(), kinds: ['note'] });
+    } catch (err) {
+      return;
+    }
+    if (target && target.locator) musicxmlNotationMoveHarmonyTo(target.locator);
+  };
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
+const MUSICXML_DURATION_KEYS = { '1': 'whole', '2': 'half', '3': 'quarter', '4': 'eighth', '5': '16th' };
+
+// Bound to the document rather than to the panel: clicking the score gives
+// focus to <body>, and a shortcut that stopped working after every click would
+// be worse than useless. The tab, the open modal and the event target between
+// them decide whether this keystroke is ours.
+function onMusicXMLNotationKeyDown(e) {
+  if (!musicxmlEditor || musicxmlEditor.tab !== 'notation') return;
+  if (e.key === 'Escape') return;              // the modal's own handler closes
+  const modal = musicxmlEditorEl('modal');
+  if (!modal || !modal.classList.contains('active')) return;
+  const target = e.target;
+  // Anywhere in the modal, or nowhere in particular. Never another field.
+  if (target && target !== document.body && target !== document.documentElement &&
+      !modal.contains(target)) return;
+  const tag = target && target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  if (e.ctrlKey || e.metaKey) {
+    const key = (e.key || '').toLowerCase();
+    if (key === 'z') { e.preventDefault(); if (e.shiftKey) musicxmlEditorRedo(); else musicxmlEditorUndo(); }
+    else if (key === 'y') { e.preventDefault(); musicxmlEditorRedo(); }
+    return;
+  }
+  if (e.altKey) return;
+
+  let handled = true;
+  switch (e.key) {
+    case 'ArrowUp': e.shiftKey ? musicxmlNotationNudgeOctave(1) : musicxmlNotationNudgePitch(1); break;
+    case 'ArrowDown': e.shiftKey ? musicxmlNotationNudgeOctave(-1) : musicxmlNotationNudgePitch(-1); break;
+    case 'ArrowLeft': musicxmlNotationStepSelection(-1); break;
+    case 'ArrowRight': musicxmlNotationStepSelection(1); break;
+    case '.': musicxmlNotationToggleDot(); break;
+    case '#': musicxmlNotationSetAccidental(1); break;
+    case 'b': case 'B': musicxmlNotationSetAccidental(-1); break;
+    case 'n': case 'N': musicxmlNotationSetAccidental(0); break;
+    case 'r': case 'R': musicxmlNotationToggleRest(); break;
+    case 't': case 'T': musicxmlNotationToggleTie(); break;
+    case 'Delete': case 'Backspace': musicxmlNotationDeleteNote(); break;
+    case 'Enter': musicxmlNotationInsertNote(); break;
+    default:
+      if (MUSICXML_DURATION_KEYS[e.key]) musicxmlNotationSetDuration(MUSICXML_DURATION_KEYS[e.key]);
+      else handled = false;
+  }
+  if (handled) e.preventDefault();
+}
+
+function onMusicXMLNotationToolbarClick(e) {
+  const btn = e.target && e.target.closest ? e.target.closest('[data-mxn-act], [data-mxn-dur], [data-mxn-acc]') : null;
+  if (!btn || btn.disabled || !musicxmlEditor) return;
+  e.preventDefault();
+
+  if (btn.dataset.mxnDur) { musicxmlNotationSetDuration(btn.dataset.mxnDur); return; }
+  if (btn.dataset.mxnAcc !== undefined && btn.dataset.mxnAcc !== null && btn.dataset.mxnAcc !== '') {
+    musicxmlNotationSetAccidental(btn.dataset.mxnAcc === 'null' ? null : parseInt(btn.dataset.mxnAcc, 10));
+    return;
+  }
+  switch (btn.dataset.mxnAct) {
+    case 'pitch-up': musicxmlNotationNudgePitch(1); break;
+    case 'pitch-down': musicxmlNotationNudgePitch(-1); break;
+    case 'octave-up': musicxmlNotationNudgeOctave(1); break;
+    case 'octave-down': musicxmlNotationNudgeOctave(-1); break;
+    case 'dot': musicxmlNotationToggleDot(); break;
+    case 'rest': musicxmlNotationToggleRest(); break;
+    case 'tie': musicxmlNotationToggleTie(); break;
+    case 'insert': musicxmlNotationInsertNote(); break;
+    case 'delete': musicxmlNotationDeleteNote(); break;
+    case 'undo': musicxmlEditorUndo(); break;
+    case 'redo': musicxmlEditorRedo(); break;
+    case 'bar-before': musicxmlNotationInsertBar('before'); break;
+    case 'bar-after': musicxmlNotationInsertBar('after'); break;
+    case 'bar-delete': musicxmlNotationDeleteBar(); break;
+    case 'time-apply': musicxmlNotationApplyTimeSignature(); break;
+    case 'chord-apply': musicxmlNotationApplyChordText(false); break;
+    case 'chord-add': musicxmlNotationStartAddChord(); break;
+    case 'chord-left': musicxmlNotationShiftHarmony(-1); break;
+    case 'chord-right': musicxmlNotationShiftHarmony(1); break;
+    case 'chord-remove': musicxmlNotationRemoveChord(); break;
+    default: break;
+  }
+}
+
+function saveMusicXMLEditor() {
+  if (!musicxmlEditor) return;
+  // Whatever is in the XML textarea is part of what the user is saving. Broken
+  // XML stops the save instead of being dropped behind a success toast.
+  if (musicxmlEditorPendingXml() !== null && !applyMusicXMLEditorXml()) {
+    setMusicXMLEditorTab('xml');
+    showToast("That XML does not parse, so the score was not saved.");
+    return;
+  }
+  const fileInfo = state.editorMusicXMLs && state.editorMusicXMLs[musicxmlEditor.index];
+  if (!fileInfo) {
+    closeMusicXMLEditor({ force: true });
+    return;
+  }
+
+  // Nothing was edited. Re-encoding anyway would throw away the user's own
+  // bytes: a .mxl would come back as plain XML, five times the size, and the
+  // export button would hand back a different file from the one they attached.
+  if (musicxmlEditor.xml === musicxmlEditor.savedXml) {
+    closeMusicXMLEditor({ force: true });
+    showToast("No changes to this score.");
+    return;
+  }
+
+  fileInfo.data = window.MusicXMLTools.encodeAttachment(musicxmlEditor.xml);
+  delete fileInfo.wasCompressed; // plain XML from here on, even if it arrived as .mxl
+  updateEditorMediaPreviews();
+
+  // A showing song-editor preview must reflect the edited score too
+  if (el.editorPreviewDisplay && el.editorPreviewDisplay.style.display !== 'none') {
+    renderEditorPreview();
+  }
+  // Trigger input event to update preview/dirty state
+  if (el.formText) el.formText.dispatchEvent(new Event('input', { bubbles: true }));
+
+  closeMusicXMLEditor({ force: true });
+  showToast("Score updated. Save the song to keep it.");
+}
+
+function bindMusicXMLEditorEvents() {
+  const modal = musicxmlEditorEl('modal');
+  if (!modal) return;
+  const onClick = (id, handler) => {
+    const btn = musicxmlEditorEl(id);
+    if (btn) btn.addEventListener('click', handler);
+  };
+  onClick('close-btn', () => closeMusicXMLEditor());
+  onClick('save-btn', () => saveMusicXMLEditor());
+  onClick('tab-notation', () => setMusicXMLEditorTab('notation'));
+  onClick('tab-chords', () => setMusicXMLEditorTab('chords'));
+  onClick('tab-xml', () => setMusicXMLEditorTab('xml'));
+  onClick('apply-btn', () => applyMusicXMLEditorEdits());
+  onClick('apply-xml-btn', () => applyMusicXMLEditorXml());
+
+  // Notation tab. The toolbar is one delegated listener so the buttons stay
+  // declarative in the markup.
+  const notationPanel = musicxmlEditorEl('notation-panel');
+  if (notationPanel) notationPanel.addEventListener('click', onMusicXMLNotationToolbarClick);
+  document.addEventListener('keydown', onMusicXMLNotationKeyDown);
+  const preview = musicxmlEditorEl('preview');
+  if (preview) preview.addEventListener('pointerdown', onMusicXMLNotationPointerDown);
+  const chordInput = musicxmlEditorEl('notation-chord');
+  if (chordInput) {
+    chordInput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      musicxmlNotationApplyChordText(false);
+    });
+  }
+  // The score re-lays-out when the modal is resized, so the overlay follows it.
+  window.addEventListener('resize', () => {
+    if (musicxmlEditor && musicxmlEditor.tab === 'notation') refreshMusicXMLNotationOverlay();
+  });
+
+  // Escape closes, with the same unsaved-changes check as the Close button
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && musicxmlEditor && modal.classList.contains('active')) {
+      closeMusicXMLEditor();
+    }
+  });
 }
 
 function updateFormTextDirection() {
@@ -4300,7 +5707,10 @@ function toggleFullscreen(enable) {
 }
 
 function downloadTextFile(filename, content) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  downloadBlob(filename, new Blob([content], { type: 'text/plain;charset=utf-8' }));
+}
+
+function downloadBlob(filename, blob) {
   const url = URL.createObjectURL(blob);
   const downloadAnchor = document.createElement('a');
   downloadAnchor.setAttribute("href", url);

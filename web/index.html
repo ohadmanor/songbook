@@ -11,7 +11,7 @@
        Material Symbols is no longer requested here -- it is self-hosted from
        fonts/ so the icons still render when the app runs offline. -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=26">
 </head>
 <body>
 
@@ -23,7 +23,7 @@
         <div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1;">
           <img src="favicon.png" alt="Logo" style="width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0;">
           <span class="logo">ChordBook</span>
-          <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700; background: var(--border-color); padding: 2px 6px; border-radius: 12px; border: 1px solid var(--border-color); line-height: 1;">v1.6.0</span>
+          <span style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 700; background: var(--border-color); padding: 2px 6px; border-radius: 12px; border: 1px solid var(--border-color); line-height: 1;">v1.7.0</span>
         </div>
         <button class="btn mobile-menu-btn" id="hide-sidebar-btn">×</button>
       </div>
@@ -493,8 +493,8 @@
                 </div>
                 
                 <div class="editor-textarea-container">
-                  <!-- Floating image container thumbnail list for document attachment if any -->
-                  <div id="editor-image-preview-container" style="display: none; gap: 0.5rem; flex-wrap: wrap; padding: 0.5rem; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color);"></div>
+                  <!-- Floating media container thumbnail list for document attachment if any -->
+                  <div id="editor-media-preview-container" style="display: none; gap: 0.5rem; flex-wrap: wrap; padding: 0.5rem; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color);"></div>
                   
                   <textarea class="editor-textarea-control" id="form-text" placeholder="Type chords directly above lyrics with spaces, like this:&#10;Am             C&#10;This is an example song" required></textarea>
                   
@@ -503,6 +503,10 @@
 
                   <!-- Floating Actions Bottom-Right -->
                   <div class="editor-floating-actions">
+                    <input type="file" id="editor-xml-input" accept=".xml,.mxl,.musicxml" style="display: none;">
+                    <button type="button" class="editor-floating-btn" id="editor-import-xml-btn" title="Import MusicXML">
+                      <span class="material-symbols-outlined">queue_music</span>
+                    </button>
                     <button type="button" class="editor-floating-btn" id="editor-preview-toggle-btn" title="Preview Mode">
                       <span class="material-symbols-outlined">visibility</span>
                     </button>
@@ -636,6 +640,122 @@
     </div>
   </div>
 
+  <!-- MusicXML Score Editor Modal (layered above the song editor) -->
+  <div class="modal-overlay" id="musicxml-editor-modal">
+    <div class="modal-content">
+      <div class="modal-header musicxml-editor-header">
+        <button type="button" class="btn" id="musicxml-editor-close-btn" title="Close">
+          <span class="material-symbols-outlined">arrow_back</span>
+        </button>
+        <h2 id="musicxml-editor-title">Edit score</h2>
+        <button type="button" class="btn btn-primary" id="musicxml-editor-save-btn">
+          <span class="material-symbols-outlined" style="font-size: 18px;">save</span>
+          <span>Save to song</span>
+        </button>
+      </div>
+      <div class="musicxml-editor-preview" id="musicxml-editor-preview"></div>
+      <div class="musicxml-editor-tabs">
+        <button type="button" class="musicxml-editor-tab active" id="musicxml-editor-tab-notation">
+          <span class="material-symbols-outlined">piano</span>
+          <span>Notation</span>
+        </button>
+        <button type="button" class="musicxml-editor-tab" id="musicxml-editor-tab-chords">
+          <span class="material-symbols-outlined">music_note</span>
+          <span>Chords &amp; Lyrics</span>
+        </button>
+        <button type="button" class="musicxml-editor-tab" id="musicxml-editor-tab-xml">
+          <span class="material-symbols-outlined">data_object</span>
+          <span>XML</span>
+        </button>
+      </div>
+      <!-- Notation: direct editing of notes, bars and chord symbols. Default tab. -->
+      <div class="musicxml-editor-panel musicxml-notation-panel" id="musicxml-editor-notation-panel" tabindex="0">
+        <div class="musicxml-notation-toolbar" id="musicxml-editor-notation-toolbar">
+          <div class="musicxml-notation-group" aria-label="Pitch">
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="pitch-up" title="Pitch up one step (Up arrow)">&#9650;</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="pitch-down" title="Pitch down one step (Down arrow)">&#9660;</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="octave-up" title="Octave up (Shift+Up)">8va</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="octave-down" title="Octave down (Shift+Down)">8vb</button>
+          </div>
+          <div class="musicxml-notation-group" aria-label="Note value">
+            <button type="button" class="musicxml-notation-btn" data-mxn-dur="whole" title="Whole note (1)">1</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-dur="half" title="Half note (2)">1/2</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-dur="quarter" title="Quarter note (3)">1/4</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-dur="eighth" title="Eighth note (4)">1/8</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-dur="16th" title="Sixteenth note (5)">1/16</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="dot" title="Toggle dot (.)">&#183;</button>
+          </div>
+          <div class="musicxml-notation-group" aria-label="Accidental">
+            <button type="button" class="musicxml-notation-btn" data-mxn-acc="1" title="Sharp (#)">&#9839;</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-acc="-1" title="Flat (b)">&#9837;</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-acc="0" title="Natural (n)">&#9838;</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-acc="null" title="Back to the key signature">Key</button>
+          </div>
+          <div class="musicxml-notation-group" aria-label="Note">
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="rest" title="Note / rest (r)">Rest</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="tie" title="Tie to the next note (t)">Tie</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="insert" title="Insert a note after this one (Enter)">
+              <span class="material-symbols-outlined">add</span>
+            </button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="delete" title="Delete the selected note (Delete)">
+              <span class="material-symbols-outlined">delete</span>
+            </button>
+          </div>
+          <div class="musicxml-notation-group" aria-label="History">
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="undo" id="musicxml-editor-notation-undo" title="Undo (Ctrl+Z)">Undo</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="redo" id="musicxml-editor-notation-redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+          </div>
+        </div>
+        <div class="musicxml-notation-rows">
+          <div class="musicxml-notation-row">
+            <span class="musicxml-notation-label">Bar</span>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="bar-before">Insert bar before</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="bar-after">Insert bar after</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="bar-delete">Delete bar</button>
+            <span class="musicxml-notation-label">Time</span>
+            <input type="number" min="1" max="64" step="1" class="form-control musicxml-notation-num" id="musicxml-editor-notation-beats" title="Beats per bar" dir="ltr">
+            <span class="musicxml-notation-label">/</span>
+            <input type="number" min="1" max="64" step="1" class="form-control musicxml-notation-num" id="musicxml-editor-notation-beat-type" title="Beat unit" dir="ltr">
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="time-apply">Set</button>
+          </div>
+          <div class="musicxml-notation-row">
+            <span class="musicxml-notation-label">Chord</span>
+            <input type="text" class="form-control musicxml-notation-chord" id="musicxml-editor-notation-chord" placeholder="Am7" spellcheck="false" dir="ltr" title="Chord symbol">
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-apply">Apply</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-add">Add chord</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-left">Move left</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-right">Move right</button>
+            <button type="button" class="musicxml-notation-btn" data-mxn-act="chord-remove">Remove chord</button>
+          </div>
+        </div>
+        <div class="musicxml-notation-status" id="musicxml-editor-notation-status">Click a note or a chord symbol to select it.</div>
+      </div>
+      <div class="musicxml-editor-panel" id="musicxml-editor-chords-panel">
+        <div class="musicxml-editor-columns">
+          <div class="musicxml-editor-column">
+            <h3>Chords</h3>
+            <div class="musicxml-editor-list" id="musicxml-editor-chord-list"></div>
+          </div>
+          <div class="musicxml-editor-column">
+            <h3>Lyrics</h3>
+            <div class="musicxml-editor-list" id="musicxml-editor-lyric-list"></div>
+          </div>
+        </div>
+        <div class="musicxml-editor-panel-footer">
+          <span class="musicxml-editor-hint">Chord suffixes the score can draw: m, 7, maj7, m7, dim, aug, sus4, sus2, 6, m6, 9, m7b5, dim7, maj9, m9, 5, N.C. Add /bass for slash chords. Empty removes the chord or syllable.</span>
+          <button type="button" class="btn" id="musicxml-editor-apply-btn">Apply</button>
+        </div>
+      </div>
+      <div class="musicxml-editor-panel" id="musicxml-editor-xml-panel" style="display: none;">
+        <textarea class="form-control musicxml-editor-xml" id="musicxml-editor-xml-textarea" spellcheck="false" dir="ltr" wrap="off"></textarea>
+        <div class="musicxml-editor-panel-footer">
+          <span class="musicxml-editor-xml-error" id="musicxml-editor-xml-error"></span>
+          <button type="button" class="btn" id="musicxml-editor-apply-xml-btn">Apply XML</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Jamming Modal -->
   <div class="modal-overlay" id="jamming-modal">
     <div class="modal-content" style="max-width: 400px;">
@@ -692,11 +812,14 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 
   <!-- JavaScript Modules -->
+  <script src="https://unpkg.com/opensheetmusicdisplay@1.8.8/build/opensheetmusicdisplay.min.js"></script>
   <script src="jszip.min.js"></script>
   <script src="transposer.js"></script>
+  <script src="musicxml-tools.js?v=1"></script>
+  <script src="musicxml-edit.js?v=4"></script>
   <script src="chord-db.js"></script>
   <script src="songs-data.js"></script>
-  <script src="parser.js"></script>
-  <script src="app.js?v=25"></script>
+  <script src="parser.js?v=1"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>
